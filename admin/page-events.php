@@ -1,4 +1,6 @@
 <?php
+defined('ABSPATH') || exit;
+
 function mmm_render_event_list() {
     $upload_dir = wp_upload_dir();
     $events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
@@ -8,6 +10,7 @@ function mmm_render_event_list() {
 
     // Handle event creation
     if (!empty($_POST['new_event_name'])) {
+        check_admin_referer('mmm_create_event', 'mmm_create_nonce');
         $event_name = sanitize_text_field($_POST['new_event_name']);
         $filename = sanitize_title_with_dashes($event_name) . '.json';
         $filepath = trailingslashit($events_dir) . $filename;
@@ -27,6 +30,7 @@ function mmm_render_event_list() {
 
     // Handle CSV export
     if (!empty($_POST['event_name']) && isset($_POST['export_csv'])) {
+        check_admin_referer('mmm_export_event', 'mmm_export_nonce');
         $event_name = sanitize_text_field($_POST['event_name']);
         $filename = sanitize_title_with_dashes($event_name) . '.json';
         $filepath = trailingslashit($events_dir) . $filename;
@@ -76,6 +80,7 @@ function mmm_render_event_list() {
 
     // Handle event deletion
     if (!empty($_POST['delete_event'])) {
+        check_admin_referer('mmm_delete_event', 'mmm_delete_nonce');
         $filename = sanitize_title_with_dashes($_POST['delete_event']) . '.json';
         $filepath = trailingslashit($events_dir) . $filename;
         if (file_exists($filepath)) {
@@ -87,6 +92,7 @@ function mmm_render_event_list() {
     ?>
     <h2>Create New Event</h2>
     <form method="POST" style="margin-bottom: 20px;">
+        <?php wp_nonce_field('mmm_create_event', 'mmm_create_nonce'); ?>
         <input type="text" name="new_event_name" required placeholder="Event Name" style="width: 300px;" />
         <button type="submit" class="button button-primary">Create Event</button>
     </form>
@@ -110,6 +116,7 @@ function mmm_render_event_list() {
                     <td><?= date('F j, Y', strtotime($event_data['created_at'])); ?></td>
                     <td>
                         <form method="POST">
+                            <?php wp_nonce_field('mmm_export_event', 'mmm_export_nonce'); ?>
                             <input type="hidden" name="event_name" value="<?= esc_attr($event_data['name']); ?>">
                             <input type="hidden" name="export_csv" value="1" />
                             <button type="submit" class="button">Export Check-ins</button>
@@ -120,6 +127,7 @@ function mmm_render_event_list() {
                     </td>
                     <td>
                         <form method="POST" onsubmit="return confirm('Are you sure you want to delete this event?');">
+                            <?php wp_nonce_field('mmm_delete_event', 'mmm_delete_nonce'); ?>
                             <input type="hidden" name="delete_event" value="<?= esc_attr($event_data['name']); ?>">
                             <button type="submit" class="button" style="color: red; font-weight: bold;">❌</button>
                         </form>

@@ -1,4 +1,6 @@
 <?php
+defined('ABSPATH') || exit;
+
 class MMM_QR_Generator
 {
     public static function generate_user_qr($user_id)

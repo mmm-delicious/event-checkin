@@ -1,4 +1,6 @@
 <?php
+defined('ABSPATH') || exit;
+
 // This file only renders the admin check-in viewer page.
 // QR generator and AJAX handler are now moved to their respective files.
 
@@ -61,17 +63,17 @@ function mmm_render_checkin_view_page() {
                     tbody.innerHTML = "";
                     data.forEach(row => {
                         const tr = document.createElement("tr");
-                         tr.innerHTML = `
-                             <td style='padding:8px;'>${row.first_name ?? ''}</td>
-                             <td style='padding:8px;'>${row.last_name ?? ''}</td>
-                             <td style='padding:8px;'>${row.bargaining_unit ?? ''}</td>
-                             <td style='padding:8px;'>${row.unit_number ?? ''}</td>
-                             <td style='padding:8px;'>${row.employer ?? ''}</td>
-                             <td style='padding:8px;'>${row.jurisdiction ?? ''}</td>
-                             <td style='padding:8px;'>${row.afscme_id ?? ''}</td>
-                             <td style='padding:8px;'>${row.member_status ?? ''}</td>
-                             <td style='padding:8px;'>${row.time ?? ''}</td>
-                         `;
+                        const fields = [
+                            row.first_name, row.last_name, row.bargaining_unit,
+                            row.unit_number, row.employer, row.jurisdiction,
+                            row.afscme_id, row.member_status, row.time
+                        ];
+                        fields.forEach(value => {
+                            const td = document.createElement("td");
+                            td.style.padding = "8px";
+                            td.textContent = value ?? '';
+                            tr.appendChild(td);
+                        });
                         tbody.appendChild(tr);
                     });
                 });
@@ -84,6 +86,9 @@ function mmm_render_checkin_view_page() {
 <?php }
 
 add_action('wp_ajax_mmm_get_checkins', function () {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized', 403);
+    }
     $slug = sanitize_title_with_dashes($_GET['event'] ?? '');
     $upload_dir = wp_upload_dir();
     $filepath = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events/' . $slug . '.json';
