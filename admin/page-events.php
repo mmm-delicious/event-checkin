@@ -20,20 +20,7 @@ function mmm_render_event_list() {
         file_put_contents($index, '<?php // Silence is golden.');
     }
 
-    // Handle guest CSV upload (fallback for non-JS — primary path is AJAX via mmm_ajax_upload_guests)
-    if ( ! empty( $_FILES['guest_csv']['tmp_name'] ) && ! empty( $_POST['guest_event_name'] ) ) {
-        check_admin_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
-        $result = mmm_process_guest_upload(
-            $_FILES['guest_csv'],
-            sanitize_text_field( $_POST['guest_event_name'] ),
-            $events_dir
-        );
-        if ( $result['success'] ) {
-            echo '<div class="notice notice-success"><p>' . esc_html( $result['message'] ) . '</p></div>';
-        } else {
-            echo '<div class="notice notice-error"><p>' . esc_html( $result['message'] ) . '</p></div>';
-        }
-    }
+    // Guest CSV upload is handled via AJAX (mmm_preview_guest_csv → mmm_import_guest_csv)
 
     // Handle event creation
     if (!empty($_POST['new_event_name'])) {
@@ -60,7 +47,7 @@ function mmm_render_event_list() {
                 'created_at' => current_time('mysql'),
                 'checkins' => []
             ];
-            file_put_contents($filepath, json_encode($event_data));
+            file_put_contents($filepath, json_encode($event_data), LOCK_EX);
             echo '<div class="notice notice-success"><p>✅ Event created: <strong>' . esc_html($event_name) . '</strong></p></div>';
         } else {
             echo '<div class="notice notice-error"><p>🚫 Event already exists.</p></div>';
@@ -197,46 +184,122 @@ function mmm_render_event_list() {
 
     <script>
     (function () {
+      function esc(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+      function setStatus(el, type, msg) {
+        el.style.color   = type === 'ok' ? 'green' : 'red';
+        el.style.fontWeight = 'bold';
+        el.textContent   = (type === 'ok' ? '\u2705 ' : '\u274C ') + msg;
+      }
+      function headerOptions(headers, selected) {
+        return headers.map(function (h) {
+          return '<option value="' + esc(h) + '"' + (h === selected ? ' selected' : '') + '>' + esc(h) + '</option>';
+        }).join('');
+      }
+
       document.querySelectorAll('.mmm-guest-upload-form').forEach(function (form) {
         form.addEventListener('submit', function (e) {
           e.preventDefault();
-          var btn    = form.querySelector('button[type="submit"]');
-          var status = form.querySelector('.upload-status');
-          if (!status) {
-            status = document.createElement('p');
-            status.className = 'upload-status';
-            status.style.cssText = 'margin:6px 0 0; font-weight:bold;';
-            form.appendChild(status);
+          var btn       = form.querySelector('button[type="submit"]');
+          var eventName = form.querySelector('[name="guest_event_name"]').value;
+          var nonce     = form.querySelector('[name="mmm_guests_nonce"]').value;
+          var statusEl  = form.querySelector('.upload-status');
+          if (!statusEl) {
+            statusEl = document.createElement('p');
+            statusEl.className = 'upload-status';
+            form.appendChild(statusEl);
           }
+
           btn.disabled    = true;
-          btn.textContent = 'Uploading\u2026';
-          status.textContent = '';
+          btn.textContent = 'Reading file\u2026';
+          statusEl.textContent = '';
 
+          // Step 1: upload file, get headers back
           var fd = new FormData(form);
-          fd.append('action', 'mmm_upload_guests');
-
+          fd.append('action', 'mmm_preview_guest_csv');
           fetch(ajaxurl, { method: 'POST', body: fd })
             .then(function (r) { return r.json(); })
             .then(function (res) {
-              btn.disabled    = false;
-              btn.textContent = 'Upload Guests';
-              if (res.success) {
-                status.style.color = 'green';
-                status.textContent = '\u2705 ' + res.data;
-                form.reset();
-              } else {
-                status.style.color = 'red';
-                status.textContent = '\u274C ' + res.data;
+              if (!res.success) {
+                btn.disabled    = false;
+                btn.textContent = 'Upload Guests';
+                setStatus(statusEl, 'err', res.data);
+                return;
               }
+              showMappingUI(form, res.data, eventName, nonce);
             })
             .catch(function () {
               btn.disabled    = false;
               btn.textContent = 'Upload Guests';
-              status.style.color = 'red';
-              status.textContent = '\u274C Connection error. Try again.';
+              setStatus(statusEl, 'err', 'Connection error. Try again.');
             });
         });
       });
+
+      function showMappingUI(form, data, eventName, nonce) {
+        form.innerHTML =
+          '<p style="margin:0 0 8px">' +
+            '<strong>' + esc(data.filename) + '</strong> &mdash; ' + data.row_count + ' rows detected.' +
+          '</p>' +
+          '<table style="border-collapse:collapse; width:100%; margin-bottom:8px">' +
+            '<tr>' +
+              '<td style="padding:5px 10px 5px 0; white-space:nowrap; font-weight:600">QR Code ID column:</td>' +
+              '<td style="padding:5px 0"><select id="mmm-qr-col" style="width:100%; padding:3px 6px">' +
+                headerOptions(data.headers, data.qr_guess) +
+              '</select></td>' +
+            '</tr>' +
+            '<tr>' +
+              '<td style="padding:5px 10px 5px 0; white-space:nowrap; font-weight:600">Phone Number column:</td>' +
+              '<td style="padding:5px 0"><select id="mmm-phone-col" style="width:100%; padding:3px 6px">' +
+                headerOptions(data.headers, data.phone_guess) +
+              '</select></td>' +
+            '</tr>' +
+          '</table>' +
+          '<p style="font-size:0.82em; color:#666; margin:0 0 10px">Rows missing both fields will be skipped.</p>' +
+          '<button id="mmm-do-import" class="button button-primary">Import</button>' +
+          '&nbsp;<button id="mmm-cancel-import" class="button">Cancel</button>' +
+          '<p class="upload-status" style="margin:8px 0 0"></p>';
+
+        form.querySelector('#mmm-cancel-import').addEventListener('click', function () {
+          location.reload();
+        });
+
+        form.querySelector('#mmm-do-import').addEventListener('click', function () {
+          var importBtn = this;
+          var statusEl  = form.querySelector('.upload-status');
+          importBtn.disabled    = true;
+          importBtn.textContent = 'Importing\u2026';
+
+          // Step 2: send column mapping + temp key
+          var fd = new FormData();
+          fd.append('action',           'mmm_import_guest_csv');
+          fd.append('mmm_guests_nonce', nonce);
+          fd.append('guest_event_name', eventName);
+          fd.append('temp_key',         data.temp_key);
+          fd.append('qr_col',           form.querySelector('#mmm-qr-col').value);
+          fd.append('phone_col',        form.querySelector('#mmm-phone-col').value);
+
+          fetch(ajaxurl, { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (res.success) {
+                setStatus(statusEl, 'ok', res.data);
+                importBtn.style.display = 'none';
+                form.querySelector('#mmm-cancel-import').textContent = 'Close';
+              } else {
+                importBtn.disabled    = false;
+                importBtn.textContent = 'Import';
+                setStatus(statusEl, 'err', res.data);
+              }
+            })
+            .catch(function () {
+              importBtn.disabled    = false;
+              importBtn.textContent = 'Import';
+              setStatus(statusEl, 'err', 'Connection error. Try again.');
+            });
+        });
+      }
     })();
     </script>
 <?php

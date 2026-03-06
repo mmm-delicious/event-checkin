@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.1.0
+ * Version: 3.2.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 // Constants
-define('MMM_ECI_VERSION', '3.1.0');
+define('MMM_ECI_VERSION', '3.2.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -82,7 +82,7 @@ function mmm_handle_checkin() {
         'time'       => date_i18n('g:ia, l, F j, Y'),
     ], $custom);
 
-    $result = file_put_contents($filepath, json_encode($event_data));
+    $result = file_put_contents($filepath, json_encode($event_data), LOCK_EX);
     if ($result === false) {
         error_log("❌ Failed to write to file: $filepath");
         wp_send_json_error("❌ Could not save check-in.");
@@ -202,39 +202,167 @@ function mmm_checkin_by_phone() {
         'method'         => 'phone',
     ];
 
-    if ( file_put_contents( $filepath, json_encode( $event_data ) ) === false ) {
+    if ( file_put_contents( $filepath, json_encode( $event_data ), LOCK_EX ) === false ) {
         wp_send_json_error( '❌ Could not save check-in.' );
     }
 
     wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
 }
 
-// ── Guest CSV upload — shared logic ──────────────────────────────
-function mmm_process_guest_upload( $file, $event_name, $events_dir ) {
-    if ( empty( $file['tmp_name'] ) || empty( $event_name ) ) {
-        return [ 'success' => false, 'message' => 'Missing file or event name.' ];
-    }
-    if ( ! is_uploaded_file( $file['tmp_name'] ) ) {
-        return [ 'success' => false, 'message' => 'Invalid file upload.' ];
-    }
-    if ( $file['size'] > 2 * 1024 * 1024 ) {
-        return [ 'success' => false, 'message' => 'File too large. Maximum 2MB.' ];
+// ── Guest CSV upload — Step 1: save temp file, return headers ────
+add_action( 'wp_ajax_mmm_preview_guest_csv', 'mmm_ajax_preview_guest_csv' );
+
+function mmm_ajax_preview_guest_csv() {
+    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized.' );
     }
 
-    $slug       = sanitize_title_with_dashes( $event_name );
-    $guest_path = trailingslashit( $events_dir ) . $slug . '.json';
+    $file = $_FILES['guest_csv'] ?? [];
+    if ( empty( $file['tmp_name'] ) || ! is_uploaded_file( $file['tmp_name'] ) ) {
+        wp_send_json_error( 'No file received.' );
+    }
+
+    // Validate extension (client MIME type is spoofable)
+    $ext = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
+    if ( $ext !== 'csv' ) {
+        wp_send_json_error( 'Only .csv files are accepted.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $tmp_dir    = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/tmp';
+    wp_mkdir_p( $tmp_dir );
+
+    // Block HTTP access to temp dir
+    $htaccess = $tmp_dir . '/.htaccess';
+    if ( ! file_exists( $htaccess ) ) {
+        file_put_contents( $htaccess, "Deny from all\n" );
+    }
+
+    // Clean up temp files older than 2 hours
+    foreach ( glob( $tmp_dir . '/*.csv' ) ?: [] as $old ) {
+        if ( filemtime( $old ) < time() - 7200 ) {
+            unlink( $old );
+        }
+    }
+
+    $temp_key  = bin2hex( random_bytes( 16 ) );
+    $temp_path = $tmp_dir . '/' . $temp_key . '.csv';
+    move_uploaded_file( $file['tmp_name'], $temp_path );
+
+    // Verify actual file size after saving (client-reported size is not trusted)
+    if ( filesize( $temp_path ) > 2 * 1024 * 1024 ) {
+        unlink( $temp_path );
+        wp_send_json_error( 'File too large. Maximum 2MB.' );
+    }
+
+    // Parse headers and count data rows
+    $fh = fopen( $temp_path, 'r' );
+    if ( ! $fh ) {
+        unlink( $temp_path );
+        wp_send_json_error( 'Could not read uploaded file.' );
+    }
+    $raw_headers = fgetcsv( $fh );
+    $row_count   = 0;
+    while ( fgetcsv( $fh ) !== false ) {
+        $row_count++;
+    }
+    fclose( $fh );
+
+    if ( empty( $raw_headers ) ) {
+        unlink( $temp_path );
+        wp_send_json_error( 'CSV appears to be empty or unreadable.' );
+    }
+
+    // Strip UTF-8 BOM from first header (present in Excel-exported CSVs)
+    $raw_headers[0] = ltrim( $raw_headers[0], "\xEF\xBB\xBF" );
+
+    $headers    = array_map( 'trim', $raw_headers );
+    $normalized = array_map( 'strtolower', $headers );
+
+    // Best guess: QR ID column
+    $qr_guess = null;
+    foreach ( [ 'afscme_id', 'afscme', 'member_id', 'qr_id', 'id' ] as $c ) {
+        $i = array_search( $c, $normalized );
+        if ( $i !== false ) { $qr_guess = $headers[ $i ]; break; }
+    }
+
+    // Best guess: phone column
+    $phone_guess = null;
+    foreach ( [ 'can2_phone', 'phone', 'phone_number', 'mobile', 'cell' ] as $c ) {
+        $i = array_search( $c, $normalized );
+        if ( $i !== false ) { $phone_guess = $headers[ $i ]; break; }
+    }
+
+    wp_send_json_success( [
+        'temp_key'    => $temp_key,
+        'headers'     => $headers,
+        'row_count'   => $row_count,
+        'qr_guess'    => $qr_guess,
+        'phone_guess' => $phone_guess,
+        'filename'    => sanitize_file_name( $file['name'] ),
+    ] );
+}
+
+// ── Guest CSV upload — Step 2: import with user-confirmed column mapping ─
+add_action( 'wp_ajax_mmm_import_guest_csv', 'mmm_ajax_import_guest_csv' );
+
+function mmm_ajax_import_guest_csv() {
+    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized.' );
+    }
+
+    $temp_key   = preg_replace( '/[^a-f0-9]/', '', $_POST['temp_key']          ?? '' );
+    $event_name = sanitize_text_field(          $_POST['guest_event_name']      ?? '' );
+    $qr_col     = sanitize_text_field(          $_POST['qr_col']                ?? '' );
+    $phone_col  = sanitize_text_field(          $_POST['phone_col']             ?? '' );
+
+    if ( ! $temp_key || ! $event_name || ! $qr_col || ! $phone_col ) {
+        wp_send_json_error( 'Missing required fields.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $tmp_dir    = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/tmp';
+    $temp_path  = $tmp_dir . '/' . $temp_key . '.csv';
+
+    if ( ! file_exists( $temp_path ) ) {
+        wp_send_json_error( 'Upload session expired — please re-upload the file.' );
+    }
+
+    $events_dir = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events';
+    $guest_path = trailingslashit( $events_dir ) . sanitize_title_with_dashes( $event_name ) . '.json';
 
     if ( ! file_exists( $guest_path ) ) {
-        return [ 'success' => false, 'message' => 'Event not found.' ];
+        unlink( $temp_path );
+        wp_send_json_error( 'Event not found.' );
     }
 
-    $rows    = array_map( 'str_getcsv', file( $file['tmp_name'] ) );
-    $headers = array_map( function( $h ) { return strtolower( trim( str_replace( ' ', '_', $h ) ) ); }, $rows[0] );
+    $fh2 = fopen( $temp_path, 'r' );
+    if ( ! $fh2 ) {
+        wp_send_json_error( 'Could not read upload session file.' );
+    }
+    // Strip UTF-8 BOM from first header
+    $first_row = fgetcsv( $fh2 );
+    $first_row[0] = ltrim( $first_row[0], "\xEF\xBB\xBF" );
+    $rows = [ $first_row ];
+    while ( ( $r = fgetcsv( $fh2 ) ) !== false ) {
+        $rows[] = $r;
+    }
+    fclose( $fh2 );
+    unlink( $temp_path );
 
+    $headers = array_map( 'trim', $rows[0] );
+    $norm    = array_map( 'strtolower', $headers );
+
+    // Locate user-selected columns
+    $qr_idx    = array_search( strtolower( trim( $qr_col ) ),    $norm );
+    $phone_idx = array_search( strtolower( trim( $phone_col ) ), $norm );
+
+    // Auto-detect supplementary columns
     $field_map = [
         'first_name'      => [ 'first_name', 'first' ],
         'last_name'       => [ 'last_name', 'last' ],
-        'phone'           => [ 'can2_phone', 'phone', 'phone_number', 'mobile', 'cell' ],
         'email'           => [ 'email', 'email_address' ],
         'member_status'   => [ 'member_status', 'status' ],
         'bargaining_unit' => [ 'bargaining_unit', 'unit' ],
@@ -244,60 +372,49 @@ function mmm_process_guest_upload( $file, $event_name, $events_dir ) {
         'job_title'       => [ 'job_title', 'title' ],
         'baseyard'        => [ 'baseyard', 'base_yard' ],
         'island'          => [ 'island' ],
-        'afscme_id'       => [ 'afscme_id', 'afscme' ],
     ];
 
     $col_idx = [];
     foreach ( $field_map as $canonical => $aliases ) {
         foreach ( $aliases as $alias ) {
-            $pos = array_search( $alias, $headers );
-            if ( $pos !== false ) {
-                $col_idx[ $canonical ] = $pos;
-                break;
-            }
+            $pos = array_search( $alias, $norm );
+            if ( $pos !== false ) { $col_idx[ $canonical ] = $pos; break; }
         }
     }
 
-    $guests = [];
+    $guests  = [];
+    $skipped = 0;
+
     foreach ( array_slice( $rows, 1 ) as $row ) {
         if ( empty( array_filter( $row ) ) ) continue;
-        $guest = [];
+
+        $qr_val    = ( $qr_idx    !== false && isset( $row[ $qr_idx ] ) )    ? trim( $row[ $qr_idx ] )    : '';
+        $phone_val = ( $phone_idx !== false && isset( $row[ $phone_idx ] ) ) ? trim( $row[ $phone_idx ] ) : '';
+
+        // Skip rows missing both key identifier fields
+        if ( $qr_val === '' && $phone_val === '' ) {
+            $skipped++;
+            continue;
+        }
+
+        $guest = [ 'qr_id' => $qr_val, 'phone' => $phone_val ];
         foreach ( $field_map as $canonical => $_ ) {
-            $guest[ $canonical ] = isset( $col_idx[ $canonical ] ) ? sanitize_text_field( $row[ $col_idx[ $canonical ] ] ?? '' ) : '';
+            $guest[ $canonical ] = isset( $col_idx[ $canonical ] )
+                ? sanitize_text_field( $row[ $col_idx[ $canonical ] ] ?? '' )
+                : '';
         }
         $guests[] = $guest;
     }
 
     $event_data           = json_decode( file_get_contents( $guest_path ), true );
     $event_data['guests'] = $guests;
-    file_put_contents( $guest_path, json_encode( $event_data ) );
+    file_put_contents( $guest_path, json_encode( $event_data ), LOCK_EX );
 
-    return [ 'success' => true, 'message' => count( $guests ) . ' guests imported for ' . $event_name . '.', 'count' => count( $guests ) ];
-}
-
-// AJAX endpoint — handles multipart upload from JS fetch(), bypassing redirect issues
-add_action( 'wp_ajax_mmm_upload_guests', 'mmm_ajax_upload_guests' );
-
-function mmm_ajax_upload_guests() {
-    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
-
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( 'Unauthorized.' );
+    $msg = count( $guests ) . ' guests imported';
+    if ( $skipped ) {
+        $msg .= ' (' . $skipped . ' skipped — missing both QR ID and phone)';
     }
-
-    $upload_dir = wp_upload_dir();
-    $events_dir = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events';
-    $result     = mmm_process_guest_upload(
-        $_FILES['guest_csv'] ?? [],
-        sanitize_text_field( $_POST['guest_event_name'] ?? '' ),
-        $events_dir
-    );
-
-    if ( $result['success'] ) {
-        wp_send_json_success( $result['message'] );
-    } else {
-        wp_send_json_error( $result['message'] );
-    }
+    wp_send_json_success( $msg . '.' );
 }
 
 // Load camera and QR scan scripts on check-in page
