@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.0.0
+ * Version: 3.1.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 // Constants
-define('MMM_ECI_VERSION', '3.0.0');
+define('MMM_ECI_VERSION', '3.1.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -207,6 +207,97 @@ function mmm_checkin_by_phone() {
     }
 
     wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
+}
+
+// ── Guest CSV upload — shared logic ──────────────────────────────
+function mmm_process_guest_upload( $file, $event_name, $events_dir ) {
+    if ( empty( $file['tmp_name'] ) || empty( $event_name ) ) {
+        return [ 'success' => false, 'message' => 'Missing file or event name.' ];
+    }
+    if ( ! is_uploaded_file( $file['tmp_name'] ) ) {
+        return [ 'success' => false, 'message' => 'Invalid file upload.' ];
+    }
+    if ( $file['size'] > 2 * 1024 * 1024 ) {
+        return [ 'success' => false, 'message' => 'File too large. Maximum 2MB.' ];
+    }
+
+    $slug       = sanitize_title_with_dashes( $event_name );
+    $guest_path = trailingslashit( $events_dir ) . $slug . '.json';
+
+    if ( ! file_exists( $guest_path ) ) {
+        return [ 'success' => false, 'message' => 'Event not found.' ];
+    }
+
+    $rows    = array_map( 'str_getcsv', file( $file['tmp_name'] ) );
+    $headers = array_map( function( $h ) { return strtolower( trim( str_replace( ' ', '_', $h ) ) ); }, $rows[0] );
+
+    $field_map = [
+        'first_name'      => [ 'first_name', 'first' ],
+        'last_name'       => [ 'last_name', 'last' ],
+        'phone'           => [ 'can2_phone', 'phone', 'phone_number', 'mobile', 'cell' ],
+        'email'           => [ 'email', 'email_address' ],
+        'member_status'   => [ 'member_status', 'status' ],
+        'bargaining_unit' => [ 'bargaining_unit', 'unit' ],
+        'unit_number'     => [ 'unit_number', 'unit_no' ],
+        'employer'        => [ 'employer' ],
+        'jurisdiction'    => [ 'jurisdiction' ],
+        'job_title'       => [ 'job_title', 'title' ],
+        'baseyard'        => [ 'baseyard', 'base_yard' ],
+        'island'          => [ 'island' ],
+        'afscme_id'       => [ 'afscme_id', 'afscme' ],
+    ];
+
+    $col_idx = [];
+    foreach ( $field_map as $canonical => $aliases ) {
+        foreach ( $aliases as $alias ) {
+            $pos = array_search( $alias, $headers );
+            if ( $pos !== false ) {
+                $col_idx[ $canonical ] = $pos;
+                break;
+            }
+        }
+    }
+
+    $guests = [];
+    foreach ( array_slice( $rows, 1 ) as $row ) {
+        if ( empty( array_filter( $row ) ) ) continue;
+        $guest = [];
+        foreach ( $field_map as $canonical => $_ ) {
+            $guest[ $canonical ] = isset( $col_idx[ $canonical ] ) ? sanitize_text_field( $row[ $col_idx[ $canonical ] ] ?? '' ) : '';
+        }
+        $guests[] = $guest;
+    }
+
+    $event_data           = json_decode( file_get_contents( $guest_path ), true );
+    $event_data['guests'] = $guests;
+    file_put_contents( $guest_path, json_encode( $event_data ) );
+
+    return [ 'success' => true, 'message' => count( $guests ) . ' guests imported for ' . $event_name . '.', 'count' => count( $guests ) ];
+}
+
+// AJAX endpoint — handles multipart upload from JS fetch(), bypassing redirect issues
+add_action( 'wp_ajax_mmm_upload_guests', 'mmm_ajax_upload_guests' );
+
+function mmm_ajax_upload_guests() {
+    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $events_dir = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events';
+    $result     = mmm_process_guest_upload(
+        $_FILES['guest_csv'] ?? [],
+        sanitize_text_field( $_POST['guest_event_name'] ?? '' ),
+        $events_dir
+    );
+
+    if ( $result['success'] ) {
+        wp_send_json_success( $result['message'] );
+    } else {
+        wp_send_json_error( $result['message'] );
+    }
 }
 
 // Load camera and QR scan scripts on check-in page

@@ -20,70 +20,18 @@ function mmm_render_event_list() {
         file_put_contents($index, '<?php // Silence is golden.');
     }
 
-    // Handle guest CSV upload
+    // Handle guest CSV upload (fallback for non-JS — primary path is AJAX via mmm_ajax_upload_guests)
     if ( ! empty( $_FILES['guest_csv']['tmp_name'] ) && ! empty( $_POST['guest_event_name'] ) ) {
         check_admin_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
-
-        if ( ! is_uploaded_file( $_FILES['guest_csv']['tmp_name'] ) ) {
-            echo '<div class="notice notice-error"><p>Invalid file upload.</p></div>';
-        } elseif ( $_FILES['guest_csv']['size'] > 2 * 1024 * 1024 ) {
-            echo '<div class="notice notice-error"><p>File too large. Maximum 2MB.</p></div>';
+        $result = mmm_process_guest_upload(
+            $_FILES['guest_csv'],
+            sanitize_text_field( $_POST['guest_event_name'] ),
+            $events_dir
+        );
+        if ( $result['success'] ) {
+            echo '<div class="notice notice-success"><p>' . esc_html( $result['message'] ) . '</p></div>';
         } else {
-            $event_name  = sanitize_text_field( $_POST['guest_event_name'] );
-            $slug        = sanitize_title_with_dashes( $event_name );
-            $guest_path  = trailingslashit( $events_dir ) . $slug . '.json';
-
-            if ( ! file_exists( $guest_path ) ) {
-                echo '<div class="notice notice-error"><p>Event not found.</p></div>';
-            } else {
-                $rows    = array_map( 'str_getcsv', file( $_FILES['guest_csv']['tmp_name'] ) );
-                $headers = array_map( function( $h ) { return strtolower( trim( str_replace( ' ', '_', $h ) ) ); }, $rows[0] );
-
-                $field_map = [
-                    'first_name'      => [ 'first_name', 'first' ],
-                    'last_name'       => [ 'last_name', 'last' ],
-                    'phone'           => [ 'phone', 'phone_number', 'mobile', 'cell' ],
-                    'email'           => [ 'email', 'email_address' ],
-                    'member_status'   => [ 'member_status', 'status' ],
-                    'bargaining_unit' => [ 'bargaining_unit', 'unit' ],
-                    'unit_number'     => [ 'unit_number', 'unit_no' ],
-                    'employer'        => [ 'employer' ],
-                    'jurisdiction'    => [ 'jurisdiction' ],
-                    'job_title'       => [ 'job_title', 'title' ],
-                    'baseyard'        => [ 'baseyard', 'base_yard' ],
-                    'island'          => [ 'island' ],
-                    'afscme_id'       => [ 'afscme_id', 'afscme', 'id' ],
-                ];
-
-                // Build column index map
-                $col_idx = [];
-                foreach ( $field_map as $canonical => $aliases ) {
-                    foreach ( $aliases as $alias ) {
-                        $pos = array_search( $alias, $headers );
-                        if ( $pos !== false ) {
-                            $col_idx[ $canonical ] = $pos;
-                            break;
-                        }
-                    }
-                }
-
-                $guests = [];
-                foreach ( array_slice( $rows, 1 ) as $row ) {
-                    if ( empty( array_filter( $row ) ) ) continue;
-                    $guest = [];
-                    foreach ( $field_map as $canonical => $_ ) {
-                        $guest[ $canonical ] = isset( $col_idx[ $canonical ] ) ? sanitize_text_field( $row[ $col_idx[ $canonical ] ] ?? '' ) : '';
-                    }
-                    $guests[] = $guest;
-                }
-
-                $event_data            = json_decode( file_get_contents( $guest_path ), true );
-                $event_data['guests']  = $guests;
-                file_put_contents( $guest_path, json_encode( $event_data ) );
-
-                $count = count( $guests );
-                echo '<div class="notice notice-success"><p>' . esc_html( $count ) . ' guests imported for <strong>' . esc_html( $event_name ) . '</strong>.</p></div>';
-            }
+            echo '<div class="notice notice-error"><p>' . esc_html( $result['message'] ) . '</p></div>';
         }
     }
 
@@ -214,7 +162,7 @@ function mmm_render_event_list() {
                             echo '<small>' . esc_html( $guest_count ) . ' guests</small><br>';
                         }
                         ?>
-                        <form method="POST" enctype="multipart/form-data" style="margin-top:4px;" action="<?php echo esc_url( admin_url('admin.php?page=mmm-event-checkin') ); ?>">
+                        <form method="POST" enctype="multipart/form-data" class="mmm-guest-upload-form" style="margin-top:4px;">
                             <?php wp_nonce_field( 'mmm_upload_guests', 'mmm_guests_nonce' ); ?>
                             <input type="hidden" name="guest_event_name" value="<?= esc_attr( $event_data['name'] ); ?>">
                             <input type="file" name="guest_csv" accept=".csv" required style="font-size:0.8rem; max-width:140px;">
@@ -245,5 +193,51 @@ function mmm_render_event_list() {
         </table>
     <?php else: ?>
         <p>No events found.</p>
-    <?php endif;
+    <?php endif; ?>
+
+    <script>
+    (function () {
+      document.querySelectorAll('.mmm-guest-upload-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var btn    = form.querySelector('button[type="submit"]');
+          var status = form.querySelector('.upload-status');
+          if (!status) {
+            status = document.createElement('p');
+            status.className = 'upload-status';
+            status.style.cssText = 'margin:6px 0 0; font-weight:bold;';
+            form.appendChild(status);
+          }
+          btn.disabled    = true;
+          btn.textContent = 'Uploading\u2026';
+          status.textContent = '';
+
+          var fd = new FormData(form);
+          fd.append('action', 'mmm_upload_guests');
+
+          fetch(ajaxurl, { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              btn.disabled    = false;
+              btn.textContent = 'Upload Guests';
+              if (res.success) {
+                status.style.color = 'green';
+                status.textContent = '\u2705 ' + res.data;
+                form.reset();
+              } else {
+                status.style.color = 'red';
+                status.textContent = '\u274C ' + res.data;
+              }
+            })
+            .catch(function () {
+              btn.disabled    = false;
+              btn.textContent = 'Upload Guests';
+              status.style.color = 'red';
+              status.textContent = '\u274C Connection error. Try again.';
+            });
+        });
+      });
+    })();
+    </script>
+<?php
 }
