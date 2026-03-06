@@ -31,32 +31,6 @@ $has_guests = !empty($event_data['guests']);
   .mmm-event-title { font-size: 1.5rem; margin: 10px 0 2px; }
   .mmm-event-date  { font-size: 0.95rem; color: #666; margin: 0 0 18px; font-weight: normal; }
 
-  /* Tabs */
-  .mmm-tabs {
-    display: flex;
-    border: 2px solid #0073aa;
-    border-radius: 10px;
-    overflow: hidden;
-    margin: 0 auto 20px;
-    max-width: 400px;
-  }
-  .mmm-tab-btn {
-    flex: 1;
-    padding: 14px 10px;
-    min-height: 52px;
-    background: #fff;
-    border: none;
-    cursor: pointer;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #0073aa;
-    touch-action: manipulation;
-    transition: background 0.15s, color 0.15s;
-  }
-  .mmm-tab-btn.active { background: #0073aa; color: #fff; }
-  .mmm-tab-panel { display: none; }
-  .mmm-tab-panel.active { display: block; }
-
   /* QR scanner */
   #qr-scanner { margin: 0 auto 16px; width: 300px; height: 300px; }
   #camera-selector {
@@ -68,6 +42,38 @@ $has_guests = !empty($event_data['guests']);
     touch-action: manipulation;
   }
   #scanner-controls { margin-bottom: 16px; }
+
+  #start-camera-btn {
+    display: block;
+    margin: 0 auto 16px;
+    padding: 14px 32px;
+    min-height: 52px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: #0073aa;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: opacity 0.15s;
+  }
+  #start-camera-btn:active { opacity: 0.8; }
+
+  /* Section divider */
+  .mmm-section-divider {
+    border: none;
+    border-top: 2px solid #ddd;
+    margin: 24px 0 20px;
+  }
+  .mmm-section-heading {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 0 0 16px;
+  }
 
   /* Phone dialpad */
   .phone-search-wrap { margin: 8px auto 0; max-width: 360px; padding: 0 8px; }
@@ -206,26 +212,19 @@ $has_guests = !empty($event_data['guests']);
   <h1 class="mmm-event-title"><?php echo $event_name; ?></h1>
   <h3 class="mmm-event-date"><?php echo $event_date; ?></h3>
 
-  <div class="mmm-tabs">
-    <button class="mmm-tab-btn active" data-tab="qr">QR Scan</button>
-    <?php if ($has_guests): ?>
-    <button class="mmm-tab-btn" data-tab="phone">Phone Number</button>
-    <?php endif; ?>
+  <!-- QR Scanner -->
+  <button id="start-camera-btn">&#x1F4F7; Start Camera</button>
+  <div id="scanner-controls" style="display:none;">
+    <label for="camera-selector">Camera:</label>
+    <select id="camera-selector"></select>
   </div>
-
-  <!-- QR Tab -->
-  <div id="tab-qr" class="mmm-tab-panel active">
-    <div id="scanner-controls">
-      <label for="camera-selector">Camera:</label>
-      <select id="camera-selector"></select>
-    </div>
-    <div id="qr-scanner"></div>
-  </div>
+  <div id="qr-scanner"></div>
 
   <?php if ($has_guests): ?>
-  <!-- Phone Tab -->
-  <div id="tab-phone" class="mmm-tab-panel">
-    <div class="phone-search-wrap">
+  <!-- Phone Check-In -->
+  <hr class="mmm-section-divider">
+  <p class="mmm-section-heading">Or check in by phone number</p>
+  <div class="phone-search-wrap">
 
       <div id="phone-display" class="placeholder">Enter phone number</div>
 
@@ -247,7 +246,6 @@ $has_guests = !empty($event_data['guests']);
       <button id="phone-search-btn" disabled>Search</button>
       <div id="phone-result"></div>
     </div>
-  </div>
   <?php endif; ?>
 
   <audio id="success-sound" preload="auto">
@@ -293,8 +291,10 @@ $has_guests = !empty($event_data['guests']);
   }
 
   // ── QR Scanner ───────────────────────────────────────────────────
-  const cameraSelect = document.getElementById('camera-selector');
-  const qr           = new Html5Qrcode('qr-scanner');
+  const cameraSelect  = document.getElementById('camera-selector');
+  const scannerControls = document.getElementById('scanner-controls');
+  const startCameraBtn  = document.getElementById('start-camera-btn');
+  const qr            = new Html5Qrcode('qr-scanner');
   let qrLocked   = false;
   let qrRunning  = false;
   let qrDeviceId = null;
@@ -302,14 +302,23 @@ $has_guests = !empty($event_data['guests']);
   function startQr(deviceId) {
     if (qrRunning) return;
     qr.start(deviceId, { fps: 10, qrbox: 250 }, handleScan)
-      .then(() => { qrRunning = true; })
-      .catch(err => console.warn('QR start:', err));
+      .then(() => {
+        qrRunning = true;
+        startCameraBtn.textContent = '\uD83D\uDCF7 Stop Camera';
+      })
+      .catch(err => {
+        console.warn('QR start:', err);
+        startCameraBtn.textContent = '\uD83D\uDCF7 Start Camera';
+      });
   }
 
   function stopQr() {
     if (!qrRunning) return;
     qr.stop()
-      .then(() => { qrRunning = false; })
+      .then(() => {
+        qrRunning = false;
+        startCameraBtn.textContent = '\uD83D\uDCF7 Start Camera';
+      })
       .catch(err => console.warn('QR stop:', err));
   }
 
@@ -323,38 +332,41 @@ $has_guests = !empty($event_data['guests']);
       .catch(() => showOverlay(false, 'Connection error.'));
   }
 
-  Html5Qrcode.getCameras().then(devices => {
-    if (!devices.length) return;
-    devices.forEach((cam, i) => {
-      const opt = document.createElement('option');
-      opt.value = cam.id;
-      opt.text  = cam.label || ('Camera ' + (i + 1));
-      cameraSelect.appendChild(opt);
-    });
-    qrDeviceId = devices[0].id;
-
-    cameraSelect.addEventListener('change', function () {
-      qrDeviceId = this.value;
-      if (qrRunning) {
-        qr.stop().then(() => { qrRunning = false; startQr(qrDeviceId); });
-      }
-    });
-
-    if (document.getElementById('tab-qr').classList.contains('active')) {
-      startQr(qrDeviceId);
+  startCameraBtn.addEventListener('click', function () {
+    if (qrRunning) {
+      stopQr();
+      return;
     }
-  }).catch(err => console.warn('Camera access:', err));
-
-  // ── Tab switching ────────────────────────────────────────────────
-  document.querySelectorAll('.mmm-tab-btn').forEach(btn => {
-    btn.addEventListener('click', function () {
-      const tab = this.dataset.tab;
-      document.querySelectorAll('.mmm-tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.mmm-tab-panel').forEach(p => p.classList.remove('active'));
-      this.classList.add('active');
-      document.getElementById('tab-' + tab).classList.add('active');
-      if (tab === 'qr') { if (qrDeviceId) startQr(qrDeviceId); }
-      else               { stopQr(); }
+    if (qrDeviceId) {
+      startQr(qrDeviceId);
+      return;
+    }
+    // First time — enumerate cameras (requires user gesture on iOS)
+    Html5Qrcode.getCameras().then(devices => {
+      if (!devices.length) {
+        startCameraBtn.textContent = 'No camera found';
+        return;
+      }
+      devices.forEach((cam, i) => {
+        const opt = document.createElement('option');
+        opt.value = cam.id;
+        opt.text  = cam.label || ('Camera ' + (i + 1));
+        cameraSelect.appendChild(opt);
+      });
+      if (devices.length > 1) {
+        scannerControls.style.display = 'block';
+      }
+      qrDeviceId = devices[0].id;
+      cameraSelect.addEventListener('change', function () {
+        qrDeviceId = this.value;
+        if (qrRunning) {
+          qr.stop().then(() => { qrRunning = false; startQr(qrDeviceId); });
+        }
+      });
+      startQr(qrDeviceId);
+    }).catch(err => {
+      console.warn('Camera access:', err);
+      startCameraBtn.textContent = 'Camera access denied';
     });
   });
 

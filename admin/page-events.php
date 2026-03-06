@@ -214,7 +214,7 @@ function mmm_render_event_list() {
                             echo '<small>' . esc_html( $guest_count ) . ' guests</small><br>';
                         }
                         ?>
-                        <form method="POST" enctype="multipart/form-data" style="margin-top:4px;">
+                        <form method="POST" enctype="multipart/form-data" style="margin-top:4px;" action="<?php echo esc_url( admin_url('admin.php?page=mmm-event-checkin') ); ?>">
                             <?php wp_nonce_field( 'mmm_upload_guests', 'mmm_guests_nonce' ); ?>
                             <input type="hidden" name="guest_event_name" value="<?= esc_attr( $event_data['name'] ); ?>">
                             <input type="file" name="guest_csv" accept=".csv" required style="font-size:0.8rem; max-width:140px;">
