@@ -79,7 +79,11 @@ function mmm_render_guest_list_page() {
                 $name_key   = strtolower($name);
                 $time_in    = $checked_by_id[$aid_key] ?? $checked_by_name[$name_key] ?? '';
             ?>
-                <tr id="guest-row-<?= $idx; ?>">
+                <tr id="guest-row-<?= $idx; ?>"
+                    data-idx="<?= esc_attr($idx); ?>"
+                    data-event="<?= esc_attr($selected); ?>"
+                    data-checkin-nonce="<?= wp_create_nonce('mmm_manual_checkin'); ?>"
+                    data-undo-nonce="<?= wp_create_nonce('mmm_undo_checkin'); ?>">
                     <td><?= esc_html($name); ?></td>
                     <td><?= esc_html($guest['qr_id'] ?? ''); ?></td>
                     <td><?= esc_html($guest['phone'] ?? ''); ?></td>
@@ -90,14 +94,11 @@ function mmm_render_guest_list_page() {
                             <span style="color:#999;">Not checked in</span>
                         <?php endif; ?>
                     </td>
-                    <td>
+                    <td id="guest-action-<?= $idx; ?>">
                         <?php if (!$is_checked): ?>
-                        <button class="button mmm-manual-checkin"
-                            data-idx="<?= esc_attr($idx); ?>"
-                            data-event="<?= esc_attr($selected); ?>"
-                            data-nonce="<?= wp_create_nonce('mmm_manual_checkin'); ?>">
-                            Check In
-                        </button>
+                        <button class="button mmm-manual-checkin">Check In</button>
+                        <?php else: ?>
+                        <button class="button mmm-undo-checkin" style="color:#dc3545; border-color:#dc3545;">Remove Check-In</button>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -106,39 +107,88 @@ function mmm_render_guest_list_page() {
         </table>
 
         <script>
-        document.querySelectorAll('.mmm-manual-checkin').forEach(function (btn) {
+        function rowOf(btn)    { return btn.closest('tr'); }
+        function statusEl(btn) { return document.getElementById('guest-status-' + rowOf(btn).dataset.idx); }
+        function actionEl(btn) { return document.getElementById('guest-action-'  + rowOf(btn).dataset.idx); }
+
+        function showStatus(btn, html) {
+            statusEl(btn).innerHTML = html;
+        }
+        function showErr(btn, msg) {
+            const span = document.createElement('span');
+            span.style.color = '#dc3545';
+            span.textContent = msg || 'Error';
+            const el = statusEl(btn);
+            el.innerHTML = '';
+            el.appendChild(span);
+        }
+
+        function wireCheckinBtn(btn) {
             btn.addEventListener('click', function () {
+                const row = rowOf(btn);
                 btn.disabled    = true;
                 btn.textContent = 'Saving\u2026';
                 const fd = new FormData();
                 fd.append('action',           'mmm_manual_checkin');
-                fd.append('event',            btn.dataset.event);
-                fd.append('guest_idx',        btn.dataset.idx);
-                fd.append('mmm_manual_nonce', btn.dataset.nonce);
+                fd.append('event',            row.dataset.event);
+                fd.append('guest_idx',        row.dataset.idx);
+                fd.append('mmm_manual_nonce', row.dataset.checkinNonce);
                 fetch(ajaxurl, { method: 'POST', body: fd })
                     .then(r => r.json())
                     .then(res => {
                         if (res.success) {
-                            document.getElementById('guest-status-' + btn.dataset.idx).innerHTML =
-                                '<span style="color:#2e7d32; font-weight:600;">&#10003; just now</span>';
-                            btn.closest('td').innerHTML = '';
+                            showStatus(btn, '<span style="color:#2e7d32; font-weight:600;">&#10003; just now</span>');
+                            const undoBtn = document.createElement('button');
+                            undoBtn.className   = 'button mmm-undo-checkin';
+                            undoBtn.style.color = '#dc3545';
+                            undoBtn.style.borderColor = '#dc3545';
+                            undoBtn.textContent = 'Remove Check-In';
+                            actionEl(btn).innerHTML = '';
+                            actionEl(btn).appendChild(undoBtn);
+                            wireUndoBtn(undoBtn);
                         } else {
                             btn.disabled    = false;
                             btn.textContent = 'Check In';
-                            const errEl = document.getElementById('guest-status-' + btn.dataset.idx);
-                            errEl.innerHTML = '';
-                            const errSpan = document.createElement('span');
-                            errSpan.style.color = '#dc3545';
-                            errSpan.textContent = res.data || 'Error';
-                            errEl.appendChild(errSpan);
+                            showErr(btn, res.data);
                         }
                     })
-                    .catch(function () {
-                        btn.disabled    = false;
-                        btn.textContent = 'Check In';
-                    });
+                    .catch(function () { btn.disabled = false; btn.textContent = 'Check In'; });
             });
-        });
+        }
+
+        function wireUndoBtn(btn) {
+            btn.addEventListener('click', function () {
+                const row = rowOf(btn);
+                btn.disabled    = true;
+                btn.textContent = 'Removing\u2026';
+                const fd = new FormData();
+                fd.append('action',         'mmm_undo_checkin');
+                fd.append('event',          row.dataset.event);
+                fd.append('guest_idx',      row.dataset.idx);
+                fd.append('mmm_undo_nonce', row.dataset.undoNonce);
+                fetch(ajaxurl, { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.success) {
+                            showStatus(btn, '<span style="color:#999;">Not checked in</span>');
+                            const ciBtn = document.createElement('button');
+                            ciBtn.className   = 'button mmm-manual-checkin';
+                            ciBtn.textContent = 'Check In';
+                            actionEl(btn).innerHTML = '';
+                            actionEl(btn).appendChild(ciBtn);
+                            wireCheckinBtn(ciBtn);
+                        } else {
+                            btn.disabled    = false;
+                            btn.textContent = 'Remove Check-In';
+                            showErr(btn, res.data);
+                        }
+                    })
+                    .catch(function () { btn.disabled = false; btn.textContent = 'Remove Check-In'; });
+            });
+        }
+
+        document.querySelectorAll('.mmm-manual-checkin').forEach(wireCheckinBtn);
+        document.querySelectorAll('.mmm-undo-checkin').forEach(wireUndoBtn);
         </script>
 
         <?php else: ?>
@@ -203,4 +253,52 @@ function mmm_ajax_manual_checkin() {
     }
 
     wp_send_json_success('Checked in.');
+}
+
+// AJAX: remove check-in for a guest
+add_action('wp_ajax_mmm_undo_checkin', 'mmm_ajax_undo_checkin');
+
+function mmm_ajax_undo_checkin() {
+    check_ajax_referer('mmm_undo_checkin', 'mmm_undo_nonce');
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized.');
+    }
+
+    $event_slug = sanitize_title_with_dashes($_POST['event'] ?? '');
+    $guest_idx  = (int) ($_POST['guest_idx'] ?? -1);
+
+    $upload_dir = wp_upload_dir();
+    $filepath   = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events/' . $event_slug . '.json';
+
+    if (!file_exists($filepath)) {
+        wp_send_json_error('Event not found.');
+    }
+
+    $event_data = json_decode(file_get_contents($filepath), true);
+    $guests     = $event_data['guests'] ?? [];
+
+    if (!isset($guests[$guest_idx])) {
+        wp_send_json_error('Guest not found.');
+    }
+
+    $g   = $guests[$guest_idx];
+    $aid = strtolower(trim($g['qr_id'] ?? ''));
+    $nm  = strtolower(trim(($g['first_name'] ?? '') . ' ' . ($g['last_name'] ?? '')));
+
+    // Remove all checkin entries that match this guest (by ID if available, otherwise by name)
+    $event_data['checkins'] = array_values(array_filter(
+        $event_data['checkins'] ?? [],
+        function ( $ci ) use ( $aid, $nm ) {
+            $ci_aid = strtolower(trim($ci['afscme_id'] ?? ''));
+            $ci_nm  = strtolower(trim(($ci['first_name'] ?? '') . ' ' . ($ci['last_name'] ?? '')));
+            if ($aid) return $ci_aid !== $aid;
+            return $ci_nm !== $nm;
+        }
+    ));
+
+    if (file_put_contents($filepath, json_encode($event_data), LOCK_EX) === false) {
+        wp_send_json_error('Could not save.');
+    }
+
+    wp_send_json_success('Check-in removed.');
 }
