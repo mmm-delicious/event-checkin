@@ -176,14 +176,15 @@ function mmm_render_event_list() {
                         <?php
                         $guest_count = count( $event_data['guests'] ?? [] );
                         if ( $guest_count > 0 ) {
-                            echo '<small>' . esc_html( $guest_count ) . ' guests</small><br>';
+                            echo '<span style="color:#2e7d32; font-weight:600;">&#10003; ' . esc_html( $guest_count ) . ' guests loaded</span><br>';
+                            echo '<small style="color:#666;">Replace list:</small><br>';
                         }
                         ?>
                         <form method="POST" enctype="multipart/form-data" class="mmm-guest-upload-form" style="margin-top:4px;">
                             <?php wp_nonce_field( 'mmm_upload_guests', 'mmm_guests_nonce' ); ?>
                             <input type="hidden" name="guest_event_name" value="<?= esc_attr( $event_data['name'] ); ?>">
                             <input type="file" name="guest_csv" accept=".csv" required style="font-size:0.8rem; max-width:140px;">
-                            <button type="submit" class="button" style="margin-top:4px;">Upload Guests</button>
+                            <button type="submit" class="button" style="margin-top:4px;"><?= $guest_count > 0 ? 'Replace List' : 'Upload Guests'; ?></button>
                         </form>
                     </td>
                     <td>
