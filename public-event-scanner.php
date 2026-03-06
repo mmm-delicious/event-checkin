@@ -32,7 +32,8 @@ $has_guests = !empty($event_data['guests']);
   .mmm-event-date  { font-size: 0.95rem; color: #666; margin: 0 0 18px; font-weight: normal; }
 
   /* QR scanner */
-  #qr-scanner { margin: 0 auto 16px; width: 300px; height: 300px; }
+  #qr-scanner { margin: 0 auto 16px; width: 300px; height: 300px; overflow: hidden; position: relative; }
+  #qr-scanner video { width: 100% !important; height: 100% !important; object-fit: cover; }
   #camera-selector {
     font-size: 0.95rem;
     padding: 6px 10px;
