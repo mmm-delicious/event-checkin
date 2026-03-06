@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.4.2
+ * Version: 3.5.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -23,7 +23,7 @@ $mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateCh
 $mmm_eci_updater->setBranch('main');
 
 // Constants
-define('MMM_ECI_VERSION', '3.4.2');
+define('MMM_ECI_VERSION', '3.5.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -72,16 +72,17 @@ function mmm_handle_checkin() {
     }
 
 
+    $all_meta = get_user_meta( $user->ID );
     $custom = [
-        'member_status'     => get_user_meta($user->ID, 'member_status', true),
-        'bargaining_unit'   => get_user_meta($user->ID, 'bargaining_unit', true),
-        'island'            => get_user_meta($user->ID, 'island', true),
-        'unit_number'       => get_user_meta($user->ID, 'unit_number', true),
-        'employer'          => get_user_meta($user->ID, 'employer', true),
-        'jurisdiction'      => get_user_meta($user->ID, 'jurisdiction', true),
-        'job_title'         => get_user_meta($user->ID, 'job_title', true),
-        'baseyard'          => get_user_meta($user->ID, 'baseyard', true),
-        'afscme_id'         => get_user_meta($user->ID, 'afscme_id', true),
+        'member_status'   => $all_meta['member_status'][0]   ?? '',
+        'bargaining_unit' => $all_meta['bargaining_unit'][0] ?? '',
+        'island'          => $all_meta['island'][0]          ?? '',
+        'unit_number'     => $all_meta['unit_number'][0]     ?? '',
+        'employer'        => $all_meta['employer'][0]        ?? '',
+        'jurisdiction'    => $all_meta['jurisdiction'][0]    ?? '',
+        'job_title'       => $all_meta['job_title'][0]       ?? '',
+        'baseyard'        => $all_meta['baseyard'][0]        ?? '',
+        'afscme_id'       => $all_meta['afscme_id'][0]       ?? '',
     ];
 
     $event_data['checkins'][] = array_merge([
@@ -106,6 +107,31 @@ function mmm_handle_checkin() {
 function mmm_normalize_phone( $phone ) {
     $digits = preg_replace( '/\D/', '', $phone );
     return strlen( $digits ) >= 10 ? substr( $digits, -10 ) : '';
+}
+
+// Phone index cache — builds phone→[{idx,name}] map, cached 12 hours per event
+function mmm_get_phone_index( $filepath, $event_slug ) {
+    $cache_key = 'mmm_pi_' . $event_slug;
+    $index     = get_transient( $cache_key );
+    if ( $index !== false ) {
+        return $index;
+    }
+
+    $event_data = json_decode( file_get_contents( $filepath ), true );
+    $guests     = $event_data['guests'] ?? [];
+    $index      = [];
+
+    foreach ( $guests as $idx => $guest ) {
+        $phone = mmm_normalize_phone( $guest['phone'] ?? '' );
+        if ( ! $phone ) continue;
+        $index[ $phone ][] = [
+            'idx'  => $idx,
+            'name' => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+        ];
+    }
+
+    set_transient( $cache_key, $index, 12 * HOUR_IN_SECONDS );
+    return $index;
 }
 
 // Phone search — finds matching guests in event guest list
@@ -141,21 +167,19 @@ function mmm_search_by_phone() {
         wp_send_json_error( '❌ Event not found.' );
     }
 
-    $event_data = json_decode( file_get_contents( $filepath ), true );
-    $guests     = $event_data['guests'] ?? [];
+    $index   = mmm_get_phone_index( $filepath, $event_slug );
+    $entries = $index[ $phone ] ?? [];
 
     $matches = [];
-    foreach ( $guests as $idx => $guest ) {
-        $guest_phone = mmm_normalize_phone( $guest['phone'] ?? '' );
-        if ( $guest_phone && $guest_phone === $phone ) {
-            $token     = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
-            $matches[] = [
-                'idx'        => $idx,
-                'name'       => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
-                'token'      => $token,
-                'full_phone' => $phone,  // always 10 digits — used by confirm step
-            ];
-        }
+    foreach ( $entries as $entry ) {
+        $idx       = $entry['idx'];
+        $token     = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
+        $matches[] = [
+            'idx'        => $idx,
+            'name'       => $entry['name'],
+            'token'      => $token,
+            'full_phone' => $phone,  // always 10 digits — used by confirm step
+        ];
     }
 
     if ( empty( $matches ) ) {
@@ -438,11 +462,62 @@ function mmm_ajax_import_guest_csv() {
     $event_data['guests'] = $guests;
     file_put_contents( $guest_path, json_encode( $event_data ), LOCK_EX );
 
+    // Bust phone index cache so next search rebuilds from fresh data
+    delete_transient( 'mmm_pi_' . sanitize_title_with_dashes( $event_name ) );
+
     $msg = count( $guests ) . ' guests imported';
     if ( $skipped ) {
         $msg .= ' (' . $skipped . ' skipped — missing both QR ID and phone)';
     }
     wp_send_json_success( $msg . '.' );
+}
+
+// Poll check-in state — admin only, used by guest list auto-refresh
+add_action( 'wp_ajax_mmm_poll_checkins', 'mmm_ajax_poll_checkins' );
+
+function mmm_ajax_poll_checkins() {
+    check_ajax_referer( 'mmm_poll_checkins', 'mmm_poll_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized.' );
+    }
+
+    $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
+    if ( ! $event_slug ) {
+        wp_send_json_error( 'Missing event.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $filepath   = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events/' . $event_slug . '.json';
+
+    if ( ! file_exists( $filepath ) ) {
+        wp_send_json_error( 'Event not found.' );
+    }
+
+    $event_data = json_decode( file_get_contents( $filepath ), true );
+    $guests     = $event_data['guests']   ?? [];
+    $checkins   = $event_data['checkins'] ?? [];
+
+    // Build lookup maps (same logic as page-guest-list.php)
+    $checked_by_id   = [];
+    $checked_by_name = [];
+    foreach ( $checkins as $ci ) {
+        $aid = strtolower( trim( $ci['afscme_id'] ?? '' ) );
+        if ( $aid ) $checked_by_id[ $aid ] = $ci['time'] ?? '';
+        $nm = strtolower( trim( ( $ci['first_name'] ?? '' ) . ' ' . ( $ci['last_name'] ?? '' ) ) );
+        if ( $nm !== ' ' ) $checked_by_name[ $nm ] = $ci['time'] ?? '';
+    }
+
+    // Return idx→time for all checked-in guests
+    $state = [];
+    foreach ( $guests as $idx => $guest ) {
+        if ( mmm_guest_is_checked_in( $guest, $checked_by_id, $checked_by_name ) ) {
+            $aid_key  = strtolower( trim( $guest['qr_id'] ?? '' ) );
+            $name_key = strtolower( trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ) );
+            $state[ $idx ] = $checked_by_id[ $aid_key ] ?? $checked_by_name[ $name_key ] ?? '';
+        }
+    }
+
+    wp_send_json_success( $state );
 }
 
 // Load camera and QR scan scripts on check-in page

@@ -54,11 +54,11 @@ function mmm_render_guest_list_page() {
             }
         ?>
 
-        <p>
+        <p id="mmm-checkin-summary">
             <strong><?= esc_html($event_data['name']); ?></strong> &mdash;
-            <?= $total; ?> guests &mdash;
-            <span style="color:#2e7d32; font-weight:600;"><?= $checked; ?> checked in</span>,
-            <span style="color:#999;"><?= ($total - $checked); ?> remaining</span>
+            <span class="mmm-total"><?= $total; ?></span> guests &mdash;
+            <span style="color:#2e7d32; font-weight:600;"><span class="mmm-checked"><?= $checked; ?></span> checked in</span>,
+            <span style="color:#999;"><span class="mmm-remaining"><?= ($total - $checked); ?></span> remaining</span>
         </p>
 
         <table class="widefat fixed striped" style="margin-top:12px;">
@@ -107,6 +107,17 @@ function mmm_render_guest_list_page() {
         </table>
 
         <script>
+        const MMM_EVENT_SLUG  = '<?= esc_js($selected); ?>';
+        const MMM_POLL_NONCE  = '<?= wp_create_nonce('mmm_poll_checkins'); ?>';
+
+        // Local state: idx (string) → time string for checked-in guests
+        const localState = {};
+        document.querySelectorAll('.mmm-undo-checkin').forEach(function(btn) {
+            const idx = btn.closest('tr').dataset.idx;
+            const statusEl = document.getElementById('guest-status-' + idx);
+            localState[idx] = statusEl ? statusEl.textContent.trim() : 'checked in';
+        });
+
         function rowOf(btn)    { return btn.closest('tr'); }
         function statusEl(btn) { return document.getElementById('guest-status-' + rowOf(btn).dataset.idx); }
         function actionEl(btn) { return document.getElementById('guest-action-'  + rowOf(btn).dataset.idx); }
@@ -123,6 +134,16 @@ function mmm_render_guest_list_page() {
             el.appendChild(span);
         }
 
+        function updateSummary() {
+            const total   = document.querySelectorAll('tbody tr').length;
+            const checked = Object.keys(localState).length;
+            const summary = document.getElementById('mmm-checkin-summary');
+            if (!summary) return;
+            summary.querySelector('.mmm-total').textContent     = total;
+            summary.querySelector('.mmm-checked').textContent   = checked;
+            summary.querySelector('.mmm-remaining').textContent = total - checked;
+        }
+
         function wireCheckinBtn(btn) {
             btn.addEventListener('click', function () {
                 const row = rowOf(btn);
@@ -137,6 +158,7 @@ function mmm_render_guest_list_page() {
                     .then(r => r.json())
                     .then(res => {
                         if (res.success) {
+                            localState[row.dataset.idx] = 'just now';
                             showStatus(btn, '<span style="color:#2e7d32; font-weight:600;">&#10003; just now</span>');
                             const undoBtn = document.createElement('button');
                             undoBtn.className   = 'button mmm-undo-checkin';
@@ -146,6 +168,7 @@ function mmm_render_guest_list_page() {
                             actionEl(btn).innerHTML = '';
                             actionEl(btn).appendChild(undoBtn);
                             wireUndoBtn(undoBtn);
+                            updateSummary();
                         } else {
                             btn.disabled    = false;
                             btn.textContent = 'Check In';
@@ -170,6 +193,7 @@ function mmm_render_guest_list_page() {
                     .then(r => r.json())
                     .then(res => {
                         if (res.success) {
+                            delete localState[row.dataset.idx];
                             showStatus(btn, '<span style="color:#999;">Not checked in</span>');
                             const ciBtn = document.createElement('button');
                             ciBtn.className   = 'button mmm-manual-checkin';
@@ -177,6 +201,7 @@ function mmm_render_guest_list_page() {
                             actionEl(btn).innerHTML = '';
                             actionEl(btn).appendChild(ciBtn);
                             wireCheckinBtn(ciBtn);
+                            updateSummary();
                         } else {
                             btn.disabled    = false;
                             btn.textContent = 'Remove Check-In';
@@ -189,6 +214,71 @@ function mmm_render_guest_list_page() {
 
         document.querySelectorAll('.mmm-manual-checkin').forEach(wireCheckinBtn);
         document.querySelectorAll('.mmm-undo-checkin').forEach(wireUndoBtn);
+
+        // ── Auto-refresh polling ──────────────────────────────────────────────
+        function pollCheckins() {
+            // Skip if any action is in progress
+            if (document.querySelector('.mmm-manual-checkin[disabled], .mmm-undo-checkin[disabled]')) return;
+
+            const fd = new FormData();
+            fd.append('action',          'mmm_poll_checkins');
+            fd.append('event',           MMM_EVENT_SLUG);
+            fd.append('mmm_poll_nonce',  MMM_POLL_NONCE);
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(res => {
+                    if (!res.success) return;
+                    const remote = res.data; // { idx: time }
+
+                    // New check-ins: in remote but not localState
+                    Object.keys(remote).forEach(function(idx) {
+                        if (localState[idx] !== undefined) return;
+                        localState[idx] = remote[idx];
+                        const statusDiv = document.getElementById('guest-status-' + idx);
+                        const actionDiv = document.getElementById('guest-action-'  + idx);
+                        if (!statusDiv || !actionDiv) return;
+                        const time = remote[idx] || 'checked in';
+                        statusDiv.innerHTML = '<span style="color:#2e7d32; font-weight:600;">&#10003; ' + time + '</span>';
+                        const undoBtn = document.createElement('button');
+                        undoBtn.className        = 'button mmm-undo-checkin';
+                        undoBtn.style.color       = '#dc3545';
+                        undoBtn.style.borderColor = '#dc3545';
+                        undoBtn.textContent       = 'Remove Check-In';
+                        actionDiv.innerHTML = '';
+                        actionDiv.appendChild(undoBtn);
+                        wireUndoBtn(undoBtn);
+                    });
+
+                    // Removed check-ins: in localState but not remote
+                    Object.keys(localState).forEach(function(idx) {
+                        if (remote[idx] !== undefined) return;
+                        delete localState[idx];
+                        const statusDiv = document.getElementById('guest-status-' + idx);
+                        const actionDiv = document.getElementById('guest-action-'  + idx);
+                        if (!statusDiv || !actionDiv) return;
+                        statusDiv.innerHTML = '<span style="color:#999;">Not checked in</span>';
+                        const ciBtn = document.createElement('button');
+                        ciBtn.className   = 'button mmm-manual-checkin';
+                        ciBtn.textContent = 'Check In';
+                        actionDiv.innerHTML = '';
+                        actionDiv.appendChild(ciBtn);
+                        wireCheckinBtn(ciBtn);
+                    });
+
+                    updateSummary();
+                })
+                .catch(function() {});
+        }
+
+        let pollInterval = setInterval(pollCheckins, 8000);
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                clearInterval(pollInterval);
+            } else {
+                pollCheckins();
+                pollInterval = setInterval(pollCheckins, 8000);
+            }
+        });
         </script>
 
         <?php else: ?>
