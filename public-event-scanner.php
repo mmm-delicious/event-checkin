@@ -76,6 +76,24 @@ $has_guests = !empty($event_data['guests']);
     margin: 0 0 16px;
   }
 
+  /* Mode tabs */
+  .mmm-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .mmm-tab {
+    flex: 1;
+    padding: 14px;
+    font-size: 1rem;
+    font-weight: 700;
+    background: #e0e0e0;
+    color: #555;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 0.15s, color 0.15s;
+  }
+  .mmm-tab.active { background: #0073aa; color: #fff; }
+  .mmm-tab:active { opacity: 0.8; }
+
   /* Phone dialpad */
   .phone-search-wrap { margin: 8px auto 0; max-width: 360px; padding: 0 8px; }
 
@@ -213,18 +231,26 @@ $has_guests = !empty($event_data['guests']);
   <h1 class="mmm-event-title"><?php echo $event_name; ?></h1>
   <h3 class="mmm-event-date"><?php echo $event_date; ?></h3>
 
-  <!-- QR Scanner -->
-  <button id="start-camera-btn">&#x1F4F7; Start Camera</button>
-  <div id="scanner-controls" style="display:none;">
-    <label for="camera-selector">Camera:</label>
-    <select id="camera-selector"></select>
+  <?php if ($has_guests): ?>
+  <div class="mmm-tabs">
+    <button class="mmm-tab active" data-tab="qr">&#x1F4F7; QR Scanner</button>
+    <button class="mmm-tab" data-tab="phone">&#x260E; Phone</button>
   </div>
-  <div id="qr-scanner"></div>
+  <?php endif; ?>
+
+  <!-- QR Scanner -->
+  <div id="tab-qr">
+    <button id="start-camera-btn">&#x1F4F7; Start Camera</button>
+    <div id="scanner-controls" style="display:none;">
+      <label for="camera-selector">Camera:</label>
+      <select id="camera-selector"></select>
+    </div>
+    <div id="qr-scanner"></div>
+  </div>
 
   <?php if ($has_guests): ?>
   <!-- Phone Check-In -->
-  <hr class="mmm-section-divider">
-  <p class="mmm-section-heading">Or check in by phone number</p>
+  <div id="tab-phone" style="display:none;">
   <div class="phone-search-wrap">
 
       <div id="phone-display" class="placeholder">Enter phone number</div>
@@ -247,6 +273,7 @@ $has_guests = !empty($event_data['guests']);
       <button id="phone-search-btn" disabled>Search</button>
       <div id="phone-result"></div>
     </div>
+  </div>
   <?php endif; ?>
 
   <audio id="success-sound" preload="auto">
@@ -307,6 +334,11 @@ $has_guests = !empty($event_data['guests']);
       .then(() => {
         qrRunning = true;
         startCameraBtn.textContent = '\uD83D\uDCF7 Stop Camera';
+        // Mirror front camera; ensure back camera is not mirrored
+        const selOpt = cameraSelect.options[cameraSelect.selectedIndex];
+        const label  = selOpt ? selOpt.text.toLowerCase() : '';
+        const video  = document.querySelector('#qr-scanner video');
+        if (video) video.style.transform = label.includes('front') ? 'scaleX(-1)' : 'scaleX(1)';
       })
       .catch(err => {
         console.warn('QR start:', err);
@@ -349,6 +381,17 @@ $has_guests = !empty($event_data['guests']);
         startCameraBtn.textContent = 'No camera found';
         return;
       }
+      // Prefer standard back camera; deprioritise ultra-wide and front cameras
+      devices.sort((a, b) => {
+        const score = l => {
+          l = (l || '').toLowerCase();
+          if (l.includes('front'))                       return 10;
+          if (l.includes('ultra') || l.includes('0.5')) return 5;
+          if (l.includes('back') || l.includes('rear')) return 0;
+          return 3;
+        };
+        return score(a.label) - score(b.label);
+      });
       devices.forEach((cam, i) => {
         const opt = document.createElement('option');
         opt.value = cam.id;
@@ -373,6 +416,18 @@ $has_guests = !empty($event_data['guests']);
   });
 
   <?php if ($has_guests): ?>
+  // ── Tab toggle ───────────────────────────────────────────────────
+  document.querySelectorAll('.mmm-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.mmm-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const show = tab.dataset.tab;
+      document.getElementById('tab-qr').style.display    = show === 'qr'    ? '' : 'none';
+      document.getElementById('tab-phone').style.display = show === 'phone' ? '' : 'none';
+      if (show !== 'qr' && qrRunning) stopQr();
+    });
+  });
+
   // ── Dialpad ──────────────────────────────────────────────────────
   const phoneDisplay   = document.getElementById('phone-display');
   const phoneSearchBtn = document.getElementById('phone-search-btn');

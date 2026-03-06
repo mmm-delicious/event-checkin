@@ -3,6 +3,7 @@ defined('ABSPATH') || exit;
 
 require_once plugin_dir_path(__FILE__) . 'page-events.php';
 require_once plugin_dir_path(__FILE__) . 'admin-view-checkins.php';
+require_once plugin_dir_path(__FILE__) . 'page-guest-list.php';
 
 
 class MMM_Admin_Menu {
@@ -30,6 +31,16 @@ class MMM_Admin_Menu {
             'manage_options',
             'mmm_view_checkins',
             'mmm_render_checkin_view_page'
+        );
+
+        // Submenu for guest list + manual check-in
+        add_submenu_page(
+            'mmm_checkin',
+            'Guest List',
+            'Guest List',
+            'manage_options',
+            'mmm_guest_list',
+            'mmm_render_guest_list_page'
         );
     }
 }
