@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 2.7.0
+ * Version: 3.0.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 // Constants
-define('MMM_ECI_VERSION', '2.7.0');
+define('MMM_ECI_VERSION', '3.0.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -92,6 +92,122 @@ function mmm_handle_checkin() {
     wp_send_json_success("✅ Welcome {$user->first_name}, you are now checked in.");
 }
 
+
+// Phone number normalization helper — strips non-digits, returns last 10
+function mmm_normalize_phone( $phone ) {
+    $digits = preg_replace( '/\D/', '', $phone );
+    return strlen( $digits ) >= 10 ? substr( $digits, -10 ) : '';
+}
+
+// Phone search — finds matching guests in event guest list
+add_action( 'wp_ajax_mmm_search_by_phone',        'mmm_search_by_phone' );
+add_action( 'wp_ajax_nopriv_mmm_search_by_phone', 'mmm_search_by_phone' );
+
+function mmm_search_by_phone() {
+    $phone      = mmm_normalize_phone( $_POST['phone'] ?? '' );
+    $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
+
+    if ( ! $phone || ! $event_slug ) {
+        wp_send_json_error( '❌ Missing phone or event.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $filepath   = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events/' . $event_slug . '.json';
+
+    if ( ! file_exists( $filepath ) ) {
+        wp_send_json_error( '❌ Event not found.' );
+    }
+
+    $event_data = json_decode( file_get_contents( $filepath ), true );
+    $guests     = $event_data['guests'] ?? [];
+
+    $matches = [];
+    foreach ( $guests as $idx => $guest ) {
+        $guest_phone = mmm_normalize_phone( $guest['phone'] ?? '' );
+        if ( $guest_phone && $guest_phone === $phone ) {
+            $token     = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
+            $matches[] = [
+                'idx'   => $idx,
+                'name'  => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+                'token' => $token,
+            ];
+        }
+    }
+
+    if ( empty( $matches ) ) {
+        wp_send_json_error( '❌ No guest found with that phone number.' );
+    }
+
+    wp_send_json_success( $matches );
+}
+
+// Phone confirm — verifies HMAC token and writes check-in
+add_action( 'wp_ajax_mmm_checkin_by_phone',        'mmm_checkin_by_phone' );
+add_action( 'wp_ajax_nopriv_mmm_checkin_by_phone', 'mmm_checkin_by_phone' );
+
+function mmm_checkin_by_phone() {
+    $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
+    $idx        = (int) ( $_POST['idx'] ?? -1 );
+    $phone      = mmm_normalize_phone( $_POST['phone'] ?? '' );
+    $token      = sanitize_text_field( $_POST['token'] ?? '' );
+
+    if ( ! $event_slug || $idx < 0 || ! $phone || ! $token ) {
+        wp_send_json_error( '❌ Missing required fields.' );
+    }
+
+    $expected = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
+    if ( ! hash_equals( $expected, $token ) ) {
+        wp_send_json_error( '❌ Invalid confirmation token.' );
+    }
+
+    $upload_dir = wp_upload_dir();
+    $filepath   = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events/' . $event_slug . '.json';
+
+    if ( ! file_exists( $filepath ) ) {
+        wp_send_json_error( '❌ Event not found.' );
+    }
+
+    $event_data = json_decode( file_get_contents( $filepath ), true );
+    $guest      = $event_data['guests'][ $idx ] ?? null;
+
+    if ( ! $guest ) {
+        wp_send_json_error( '❌ Guest record not found.' );
+    }
+
+    if ( ! isset( $event_data['checkins'] ) || ! is_array( $event_data['checkins'] ) ) {
+        $event_data['checkins'] = [];
+    }
+
+    foreach ( $event_data['checkins'] as $entry ) {
+        if ( ! empty( $entry['phone'] ) && mmm_normalize_phone( $entry['phone'] ) === $phone ) {
+            wp_send_json_error( "❌ {$guest['first_name']} is already checked in." );
+        }
+    }
+
+    $event_data['checkins'][] = [
+        'first_name'     => $guest['first_name']     ?? '',
+        'last_name'      => $guest['last_name']       ?? '',
+        'phone'          => $phone,
+        'email'          => $guest['email']           ?? '',
+        'bargaining_unit'=> $guest['bargaining_unit'] ?? '',
+        'unit_number'    => $guest['unit_number']     ?? '',
+        'employer'       => $guest['employer']        ?? '',
+        'jurisdiction'   => $guest['jurisdiction']    ?? '',
+        'job_title'      => $guest['job_title']       ?? '',
+        'baseyard'       => $guest['baseyard']        ?? '',
+        'island'         => $guest['island']          ?? '',
+        'member_status'  => $guest['member_status']   ?? '',
+        'afscme_id'      => $guest['afscme_id']       ?? '',
+        'time'           => date_i18n( 'g:ia, l, F j, Y' ),
+        'method'         => 'phone',
+    ];
+
+    if ( file_put_contents( $filepath, json_encode( $event_data ) ) === false ) {
+        wp_send_json_error( '❌ Could not save check-in.' );
+    }
+
+    wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
+}
 
 // Load camera and QR scan scripts on check-in page
 add_action('admin_enqueue_scripts', function ($hook) {

@@ -41,6 +41,7 @@ function mmm_render_checkin_view_page() {
                         <th style="padding: 8px;">Jurisdiction</th>
                         <th style="padding: 8px;">AFSCME ID</th>
                         <th style="padding: 8px;">Member Status</th>
+                        <th style="padding: 8px;">Method</th>
                         <th style="padding: 8px;">Check-In Time</th>
                     </tr>
                 </thead>
@@ -66,7 +67,8 @@ function mmm_render_checkin_view_page() {
                         const fields = [
                             row.first_name, row.last_name, row.bargaining_unit,
                             row.unit_number, row.employer, row.jurisdiction,
-                            row.afscme_id, row.member_status, row.time
+                            row.afscme_id, row.member_status,
+                            row.method ?? 'qr', row.time
                         ];
                         fields.forEach(value => {
                             const td = document.createElement("td");

@@ -20,6 +20,73 @@ function mmm_render_event_list() {
         file_put_contents($index, '<?php // Silence is golden.');
     }
 
+    // Handle guest CSV upload
+    if ( ! empty( $_FILES['guest_csv']['tmp_name'] ) && ! empty( $_POST['guest_event_name'] ) ) {
+        check_admin_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+
+        if ( ! is_uploaded_file( $_FILES['guest_csv']['tmp_name'] ) ) {
+            echo '<div class="notice notice-error"><p>Invalid file upload.</p></div>';
+        } elseif ( $_FILES['guest_csv']['size'] > 2 * 1024 * 1024 ) {
+            echo '<div class="notice notice-error"><p>File too large. Maximum 2MB.</p></div>';
+        } else {
+            $event_name  = sanitize_text_field( $_POST['guest_event_name'] );
+            $slug        = sanitize_title_with_dashes( $event_name );
+            $guest_path  = trailingslashit( $events_dir ) . $slug . '.json';
+
+            if ( ! file_exists( $guest_path ) ) {
+                echo '<div class="notice notice-error"><p>Event not found.</p></div>';
+            } else {
+                $rows    = array_map( 'str_getcsv', file( $_FILES['guest_csv']['tmp_name'] ) );
+                $headers = array_map( function( $h ) { return strtolower( trim( str_replace( ' ', '_', $h ) ) ); }, $rows[0] );
+
+                $field_map = [
+                    'first_name'      => [ 'first_name', 'first' ],
+                    'last_name'       => [ 'last_name', 'last' ],
+                    'phone'           => [ 'phone', 'phone_number', 'mobile', 'cell' ],
+                    'email'           => [ 'email', 'email_address' ],
+                    'member_status'   => [ 'member_status', 'status' ],
+                    'bargaining_unit' => [ 'bargaining_unit', 'unit' ],
+                    'unit_number'     => [ 'unit_number', 'unit_no' ],
+                    'employer'        => [ 'employer' ],
+                    'jurisdiction'    => [ 'jurisdiction' ],
+                    'job_title'       => [ 'job_title', 'title' ],
+                    'baseyard'        => [ 'baseyard', 'base_yard' ],
+                    'island'          => [ 'island' ],
+                    'afscme_id'       => [ 'afscme_id', 'afscme', 'id' ],
+                ];
+
+                // Build column index map
+                $col_idx = [];
+                foreach ( $field_map as $canonical => $aliases ) {
+                    foreach ( $aliases as $alias ) {
+                        $pos = array_search( $alias, $headers );
+                        if ( $pos !== false ) {
+                            $col_idx[ $canonical ] = $pos;
+                            break;
+                        }
+                    }
+                }
+
+                $guests = [];
+                foreach ( array_slice( $rows, 1 ) as $row ) {
+                    if ( empty( array_filter( $row ) ) ) continue;
+                    $guest = [];
+                    foreach ( $field_map as $canonical => $_ ) {
+                        $guest[ $canonical ] = isset( $col_idx[ $canonical ] ) ? sanitize_text_field( $row[ $col_idx[ $canonical ] ] ?? '' ) : '';
+                    }
+                    $guests[] = $guest;
+                }
+
+                $event_data            = json_decode( file_get_contents( $guest_path ), true );
+                $event_data['guests']  = $guests;
+                file_put_contents( $guest_path, json_encode( $event_data ) );
+
+                $count = count( $guests );
+                echo '<div class="notice notice-success"><p>' . esc_html( $count ) . ' guests imported for <strong>' . esc_html( $event_name ) . '</strong>.</p></div>';
+            }
+        }
+    }
+
     // Handle event creation
     if (!empty($_POST['new_event_name'])) {
         check_admin_referer('mmm_create_event', 'mmm_create_nonce');
@@ -77,7 +144,7 @@ function mmm_render_event_list() {
             fputcsv($output, [
                 'First Name', 'Last Name', 'Bargaining Unit', 'Unit', 'Employer',
                 'Jurisdiction', 'Job Title', 'Baseyard', 'Island', 'Member Status',
-                'AFSCME ID', 'Checked in Time'
+                'AFSCME ID', 'Phone', 'Check-In Method', 'Checked in Time'
             ]);
 
             foreach ($checkins as $entry) {
@@ -93,6 +160,8 @@ function mmm_render_event_list() {
                     $entry['island'] ?? '',
                     $entry['member_status'] ?? '',
                     $entry['afscme_id'] ?? '',
+                    $entry['phone'] ?? '',
+                    $entry['method'] ?? 'qr',
                     $entry['time'] ?? '',
                 ]);
             }
@@ -126,7 +195,7 @@ function mmm_render_event_list() {
         <h2>Event List</h2>
         <table class="widefat">
             <thead>
-                <tr><th>Event Name</th><th>Created</th><th>Export</th><th>Launch Scanner</th><th>Delete</th></tr>
+                <tr><th>Event Name</th><th>Created</th><th>Guests</th><th>Export</th><th>Launch Scanner</th><th>Delete</th></tr>
             </thead>
             <tbody>
             <?php foreach ($event_files as $filepath):
@@ -138,6 +207,20 @@ function mmm_render_event_list() {
                 <tr>
                     <td><?= esc_html($event_data['name']); ?></td>
                     <td><?= date('F j, Y', strtotime($event_data['created_at'])); ?></td>
+                    <td>
+                        <?php
+                        $guest_count = count( $event_data['guests'] ?? [] );
+                        if ( $guest_count > 0 ) {
+                            echo '<small>' . esc_html( $guest_count ) . ' guests</small><br>';
+                        }
+                        ?>
+                        <form method="POST" enctype="multipart/form-data" style="margin-top:4px;">
+                            <?php wp_nonce_field( 'mmm_upload_guests', 'mmm_guests_nonce' ); ?>
+                            <input type="hidden" name="guest_event_name" value="<?= esc_attr( $event_data['name'] ); ?>">
+                            <input type="file" name="guest_csv" accept=".csv" required style="font-size:0.8rem; max-width:140px;">
+                            <button type="submit" class="button" style="margin-top:4px;">Upload Guests</button>
+                        </form>
+                    </td>
                     <td>
                         <form method="POST">
                             <?php wp_nonce_field('mmm_export_event', 'mmm_export_nonce'); ?>
