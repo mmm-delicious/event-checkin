@@ -273,8 +273,9 @@ $has_guests = !empty($event_data['guests']);
 (function () {
   'use strict';
 
-  const AJAX_URL   = <?php echo json_encode( admin_url('admin-ajax.php') ); ?>;
-  const EVENT_SLUG = <?php echo json_encode( $event_slug ); ?>;
+  const AJAX_URL        = <?php echo json_encode( admin_url('admin-ajax.php') ); ?>;
+  const EVENT_SLUG      = <?php echo json_encode( $event_slug ); ?>;
+  const DEFAULT_AREA    = <?php echo json_encode( preg_replace('/\D/', '', get_option('mmm_default_area_code', '808')) ); ?>;
 
   const successSound = document.getElementById('success-sound');
   const errorSound   = document.getElementById('error-sound');
@@ -396,11 +397,18 @@ $has_guests = !empty($event_data['guests']);
     if (rawDigits.length === 0) {
       phoneDisplay.textContent = 'Enter phone number';
       phoneDisplay.className   = 'placeholder';
+      phoneSearchBtn.textContent = 'Search';
     } else {
       phoneDisplay.textContent = formatPhone(rawDigits);
       phoneDisplay.className   = 'has-value';
+      if (rawDigits.length === 7) {
+        phoneSearchBtn.textContent = 'Search (' + DEFAULT_AREA + ')';
+      } else {
+        phoneSearchBtn.textContent = 'Search';
+      }
     }
-    phoneSearchBtn.disabled = rawDigits.length < 10;
+    var canSearch = rawDigits.length === 7 || rawDigits.length >= 10;
+    phoneSearchBtn.disabled = !canSearch;
   }
 
   document.querySelectorAll('.dialpad-key[data-digit]').forEach(key => {
@@ -453,7 +461,7 @@ $has_guests = !empty($event_data['guests']);
           return;
         }
         const match = res.data[0];
-        pendingConfirm = { idx: match.idx, token: match.token, phone: formattedPhone };
+        pendingConfirm = { idx: match.idx, token: match.token, phone: match.full_phone };
         openConfirm(match.name);
       })
       .catch(() => {

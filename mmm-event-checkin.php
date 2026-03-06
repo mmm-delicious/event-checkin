@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.2.0
+ * Version: 3.3.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 // Constants
-define('MMM_ECI_VERSION', '3.2.0');
+define('MMM_ECI_VERSION', '3.3.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -104,11 +104,25 @@ add_action( 'wp_ajax_mmm_search_by_phone',        'mmm_search_by_phone' );
 add_action( 'wp_ajax_nopriv_mmm_search_by_phone', 'mmm_search_by_phone' );
 
 function mmm_search_by_phone() {
-    $phone      = mmm_normalize_phone( $_POST['phone'] ?? '' );
+    $raw_digits = preg_replace( '/\D/', '', $_POST['phone'] ?? '' );
     $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
 
-    if ( ! $phone || ! $event_slug ) {
+    if ( ! $raw_digits || ! $event_slug ) {
         wp_send_json_error( '❌ Missing phone or event.' );
+    }
+
+    // Resolve 7-digit local input → prepend default area code
+    $used_area_code = null;
+    if ( strlen( $raw_digits ) === 7 ) {
+        $default_area   = preg_replace( '/\D/', '', get_option( 'mmm_default_area_code', '808' ) );
+        $phone          = $default_area . $raw_digits;
+        $used_area_code = $default_area;
+    } else {
+        $phone = strlen( $raw_digits ) >= 10 ? substr( $raw_digits, -10 ) : '';
+    }
+
+    if ( ! $phone ) {
+        wp_send_json_error( '❌ Enter 7 digits (local) or all 10 digits including area code.' );
     }
 
     $upload_dir = wp_upload_dir();
@@ -127,15 +141,20 @@ function mmm_search_by_phone() {
         if ( $guest_phone && $guest_phone === $phone ) {
             $token     = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
             $matches[] = [
-                'idx'   => $idx,
-                'name'  => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
-                'token' => $token,
+                'idx'        => $idx,
+                'name'       => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+                'token'      => $token,
+                'full_phone' => $phone,  // always 10 digits — used by confirm step
             ];
         }
     }
 
     if ( empty( $matches ) ) {
-        wp_send_json_error( '❌ No guest found with that phone number.' );
+        $msg = '❌ No guest found with that phone number.';
+        if ( $used_area_code ) {
+            $msg .= ' (searched with area code ' . esc_html( $used_area_code ) . ' — try typing all 10 digits if different area code)';
+        }
+        wp_send_json_error( $msg );
     }
 
     wp_send_json_success( $matches );

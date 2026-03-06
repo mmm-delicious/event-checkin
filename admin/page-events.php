@@ -22,6 +22,19 @@ function mmm_render_event_list() {
 
     // Guest CSV upload is handled via AJAX (mmm_preview_guest_csv → mmm_import_guest_csv)
 
+    // Handle settings save
+    if ( isset( $_POST['mmm_save_settings'] ) ) {
+        check_admin_referer( 'mmm_settings', 'mmm_settings_nonce' );
+        $area_code = preg_replace( '/\D/', '', $_POST['mmm_default_area_code'] ?? '808' );
+        $area_code = substr( $area_code, 0, 3 );
+        if ( strlen( $area_code ) === 3 ) {
+            update_option( 'mmm_default_area_code', $area_code );
+            echo '<div class="notice notice-success"><p>Settings saved.</p></div>';
+        } else {
+            echo '<div class="notice notice-error"><p>Invalid area code — must be 3 digits.</p></div>';
+        }
+    }
+
     // Handle event creation
     if (!empty($_POST['new_event_name'])) {
         check_admin_referer('mmm_create_event', 'mmm_create_nonce');
@@ -118,6 +131,23 @@ function mmm_render_event_list() {
     }
 
     ?>
+    <h2>Settings</h2>
+    <form method="POST" style="margin-bottom: 24px;">
+        <?php wp_nonce_field( 'mmm_settings', 'mmm_settings_nonce' ); ?>
+        <table class="form-table" style="width:auto">
+            <tr>
+                <th scope="row"><label for="mmm_default_area_code">Default Area Code</label></th>
+                <td>
+                    <input type="text" id="mmm_default_area_code" name="mmm_default_area_code"
+                        value="<?php echo esc_attr( get_option( 'mmm_default_area_code', '808' ) ); ?>"
+                        maxlength="3" size="4" style="font-size:1.1rem; width:60px; text-align:center;" />
+                    <p class="description">Used when a phone number is entered without an area code (7 digits). Default: 808.</p>
+                </td>
+            </tr>
+        </table>
+        <button type="submit" name="mmm_save_settings" class="button button-secondary">Save Settings</button>
+    </form>
+
     <h2>Create New Event</h2>
     <form method="POST" style="margin-bottom: 20px;">
         <?php wp_nonce_field('mmm_create_event', 'mmm_create_nonce'); ?>
