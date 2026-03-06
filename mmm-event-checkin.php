@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 2.6.0
+ * Version: 2.7.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 // Constants
-define('MMM_ECI_VERSION', '2.6.0');
+define('MMM_ECI_VERSION', '2.7.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -24,8 +24,11 @@ require_once MMM_ECI_PATH . 'includes/shortcodes.php';
 require_once MMM_ECI_PATH . 'admin/class-admin-menu.php';
 require_once MMM_ECI_PATH . 'admin/page-events.php';
 
-// Register AJAX check-in handler in main plugin file
-add_action('wp_ajax_mmm_checkin', function () {
+// Register AJAX check-in handler — both logged-in and public (nopriv) for public scanner page
+add_action('wp_ajax_mmm_checkin', 'mmm_handle_checkin');
+add_action('wp_ajax_nopriv_mmm_checkin', 'mmm_handle_checkin');
+
+function mmm_handle_checkin() {
     if (empty($_POST['data'])) {
         wp_send_json_error('❌ No QR code data received.');
     }
@@ -87,14 +90,14 @@ add_action('wp_ajax_mmm_checkin', function () {
 
     error_log("✅ Successfully saved check-in to $filepath");
     wp_send_json_success("✅ Welcome {$user->first_name}, you are now checked in.");
-});
+}
 
 
 // Load camera and QR scan scripts on check-in page
 add_action('admin_enqueue_scripts', function ($hook) {
     if ($hook !== 'toplevel_page_mmm_checkin') return;
 
-    wp_enqueue_script('html5-qrcode', 'https://unpkg.com/html5-qrcode', [], null, true);
+    wp_enqueue_script('html5-qrcode', MMM_ECI_URL . 'assets/js/html5-qrcode.min.js', [], MMM_ECI_VERSION, true);
     wp_enqueue_script('mmm-qr-js', MMM_ECI_URL . 'assets/js/qr-scanner.js', ['jquery'], MMM_ECI_VERSION, true);
 
     wp_localize_script('mmm-qr-js', 'mmm_qr_ajax', [

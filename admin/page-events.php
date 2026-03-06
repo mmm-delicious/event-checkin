@@ -8,12 +8,36 @@ function mmm_render_event_list() {
         wp_mkdir_p($events_dir);
     }
 
+    // Block direct HTTP access to event JSON files
+    $htaccess = trailingslashit($events_dir) . '.htaccess';
+    if (!file_exists($htaccess)) {
+        file_put_contents($htaccess, "<Files \"*.json\">\n  Order Allow,Deny\n  Deny from all\n</Files>\n");
+    }
+
+    // Also block directory listing
+    $index = trailingslashit($events_dir) . 'index.php';
+    if (!file_exists($index)) {
+        file_put_contents($index, '<?php // Silence is golden.');
+    }
+
     // Handle event creation
     if (!empty($_POST['new_event_name'])) {
         check_admin_referer('mmm_create_event', 'mmm_create_nonce');
         $event_name = sanitize_text_field($_POST['new_event_name']);
-        $filename = sanitize_title_with_dashes($event_name) . '.json';
+        $slug = sanitize_title_with_dashes($event_name);
+        $filename = $slug . '.json';
         $filepath = trailingslashit($events_dir) . $filename;
+
+        // Check for slug collision — two different names that produce the same slug
+        if (file_exists($filepath)) {
+            $existing = json_decode(file_get_contents($filepath), true);
+            $existing_name = $existing['name'] ?? $slug;
+            if (strtolower($existing_name) !== strtolower($event_name)) {
+                echo '<div class="notice notice-error"><p>🚫 An event with a conflicting name already exists: <strong>' . esc_html($existing_name) . '</strong>. Please choose a different name.</p></div>';
+            } else {
+                echo '<div class="notice notice-error"><p>🚫 Event already exists.</p></div>';
+            }
+        }
 
         if (!file_exists($filepath)) {
             $event_data = [

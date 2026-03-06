@@ -88,7 +88,7 @@ $event_date = date('l, F j, Y', strtotime($event_data['created_at']));
 <div id="overlay-message"></div>
 
 
-<script src="https://unpkg.com/html5-qrcode"></script>
+<script src="<?php echo esc_url( plugin_dir_url(__FILE__) . 'assets/js/html5-qrcode.min.js' ); ?>"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const scanner = document.getElementById("qr-scanner");
