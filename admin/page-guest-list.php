@@ -353,33 +353,29 @@ function mmm_ajax_manual_checkin() {
         wp_send_json_error('Event not found.');
     }
 
-    $event_data = json_decode(file_get_contents($filepath), true);
-    $guests     = $event_data['guests'] ?? [];
-
-    if (!isset($guests[$guest_idx])) {
-        wp_send_json_error('Guest not found.');
-    }
-
-    $g = $guests[$guest_idx];
-    $event_data['checkins'][] = [
-        'first_name'      => $g['first_name']      ?? '',
-        'last_name'       => $g['last_name']       ?? '',
-        'email'           => $g['email']           ?? '',
-        'afscme_id'       => $g['qr_id']           ?? '',
-        'member_status'   => $g['member_status']   ?? '',
-        'bargaining_unit' => $g['bargaining_unit'] ?? '',
-        'unit_number'     => $g['unit_number']     ?? '',
-        'employer'        => $g['employer']        ?? '',
-        'jurisdiction'    => $g['jurisdiction']    ?? '',
-        'baseyard'        => $g['baseyard']        ?? '',
-        'island'          => $g['island']          ?? '',
-        'time'            => date_i18n('g:ia, l, F j, Y'),
-        'method'          => 'manual',
-    ];
-
-    if (file_put_contents($filepath, json_encode($event_data), LOCK_EX) === false) {
-        wp_send_json_error('Could not save check-in.');
-    }
+    mmm_locked_event_update( $filepath, function ( $event_data ) use ( $guest_idx ) {
+        $guests = $event_data['guests'] ?? [];
+        if ( ! isset( $guests[$guest_idx] ) ) {
+            wp_send_json_error( 'Guest not found.' );
+        }
+        $g = $guests[$guest_idx];
+        $event_data['checkins'][] = [
+            'first_name'      => $g['first_name']      ?? '',
+            'last_name'       => $g['last_name']       ?? '',
+            'email'           => $g['email']           ?? '',
+            'afscme_id'       => $g['qr_id']           ?? '',
+            'member_status'   => $g['member_status']   ?? '',
+            'bargaining_unit' => $g['bargaining_unit'] ?? '',
+            'unit_number'     => $g['unit_number']     ?? '',
+            'employer'        => $g['employer']        ?? '',
+            'jurisdiction'    => $g['jurisdiction']    ?? '',
+            'baseyard'        => $g['baseyard']        ?? '',
+            'island'          => $g['island']          ?? '',
+            'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'method'          => 'manual',
+        ];
+        return $event_data;
+    } );
 
     wp_send_json_success('Checked in.');
 }
@@ -403,31 +399,28 @@ function mmm_ajax_undo_checkin() {
         wp_send_json_error('Event not found.');
     }
 
-    $event_data = json_decode(file_get_contents($filepath), true);
-    $guests     = $event_data['guests'] ?? [];
-
-    if (!isset($guests[$guest_idx])) {
-        wp_send_json_error('Guest not found.');
-    }
-
-    $g   = $guests[$guest_idx];
-    $aid = strtolower(trim($g['qr_id'] ?? ''));
-    $nm  = strtolower(trim(($g['first_name'] ?? '') . ' ' . ($g['last_name'] ?? '')));
-
-    // Remove all checkin entries that match this guest (by ID if available, otherwise by name)
-    $event_data['checkins'] = array_values(array_filter(
-        $event_data['checkins'] ?? [],
-        function ( $ci ) use ( $aid, $nm ) {
-            $ci_aid = strtolower(trim($ci['afscme_id'] ?? ''));
-            $ci_nm  = strtolower(trim(($ci['first_name'] ?? '') . ' ' . ($ci['last_name'] ?? '')));
-            if ($aid) return $ci_aid !== $aid;
-            return $ci_nm !== $nm;
+    mmm_locked_event_update( $filepath, function ( $event_data ) use ( $guest_idx ) {
+        $guests = $event_data['guests'] ?? [];
+        if ( ! isset( $guests[$guest_idx] ) ) {
+            wp_send_json_error( 'Guest not found.' );
         }
-    ));
+        $g   = $guests[$guest_idx];
+        $aid = strtolower( trim( $g['qr_id'] ?? '' ) );
+        $nm  = strtolower( trim( ( $g['first_name'] ?? '' ) . ' ' . ( $g['last_name'] ?? '' ) ) );
 
-    if (file_put_contents($filepath, json_encode($event_data), LOCK_EX) === false) {
-        wp_send_json_error('Could not save.');
-    }
+        // Remove all check-in entries that match this guest (by ID if available, otherwise by name)
+        $event_data['checkins'] = array_values( array_filter(
+            $event_data['checkins'] ?? [],
+            function ( $ci ) use ( $aid, $nm ) {
+                $ci_aid = strtolower( trim( $ci['afscme_id'] ?? '' ) );
+                $ci_nm  = strtolower( trim( ( $ci['first_name'] ?? '' ) . ' ' . ( $ci['last_name'] ?? '' ) ) );
+                if ( $aid ) return $ci_aid !== $aid;
+                return $ci_nm !== $nm;
+            }
+        ) );
+
+        return $event_data;
+    } );
 
     wp_send_json_success('Check-in removed.');
 }

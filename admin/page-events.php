@@ -1,6 +1,22 @@
 <?php
 defined('ABSPATH') || exit;
 
+/**
+ * Sanitize a cell value for CSV export to prevent formula injection.
+ * Cells that begin with =, +, -, @, |, or % are prefixed with a single quote,
+ * which neutralises them in Excel, Google Sheets, and LibreOffice Calc.
+ *
+ * @param  mixed  $value
+ * @return string
+ */
+function mmm_csv_escape( $value ) {
+    $value = (string) $value;
+    if ( $value !== '' && in_array( $value[0], [ '=', '+', '-', '@', '|', '%' ], true ) ) {
+        return "'" . $value;
+    }
+    return $value;
+}
+
 function mmm_render_event_list() {
     $upload_dir = wp_upload_dir();
     $events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
@@ -84,7 +100,7 @@ function mmm_render_event_list() {
             $csv_filename = sanitize_file_name("{$event_data['name']} - " . date('F-j-Y') . ".csv");
 
             header('Content-Type: text/csv');
-            header("Content-Disposition: attachment; filename=\"$csv_filename\"");
+            header( 'Content-Disposition: attachment; filename="' . addcslashes( $csv_filename, '"\\' ) . '"' );
             header('Pragma: no-cache');
             header('Expires: 0');
 
@@ -96,7 +112,7 @@ function mmm_render_event_list() {
             ]);
 
             foreach ($checkins as $entry) {
-                fputcsv($output, [
+                fputcsv($output, array_map( 'mmm_csv_escape', [
                     $entry['first_name'] ?? '',
                     $entry['last_name'] ?? '',
                     $entry['bargaining_unit'] ?? '',
@@ -112,7 +128,7 @@ function mmm_render_event_list() {
                     $entry['method'] ?? 'qr',
                     $entry['time'] ?? '',
                     $entry['upw_flag'] ?? '',
-                ]);
+                ] ) );
             }
 
             fclose($output);

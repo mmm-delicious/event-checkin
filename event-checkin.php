@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.6.0
+ * Version: 3.6.1
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -23,7 +23,7 @@ $mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateCh
 $mmm_eci_updater->setBranch('main');
 
 // Constants
-define('MMM_ECI_VERSION', '3.6.0');
+define('MMM_ECI_VERSION', '3.6.1');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -32,6 +32,54 @@ require_once MMM_ECI_PATH . 'includes/class-qr-generator.php';
 require_once MMM_ECI_PATH . 'includes/shortcodes.php';
 require_once MMM_ECI_PATH . 'admin/class-admin-menu.php';
 require_once MMM_ECI_PATH . 'admin/page-events.php';
+
+// ── Security helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Validate an event slug and return its absolute file path.
+ * Slugs from sanitize_title_with_dashes() are already [a-z0-9_-],
+ * but this check is defense-in-depth against any future call-site that skips that sanitization.
+ *
+ * @return string|false  Absolute path on success, false if the slug is unsafe.
+ */
+function mmm_safe_event_path( $events_dir, $slug ) {
+    if ( ! preg_match( '/^[a-z0-9_-]+$/', $slug ) ) {
+        return false;
+    }
+    return trailingslashit( $events_dir ) . $slug . '.json';
+}
+
+/**
+ * Atomically read → modify → write an event JSON file under an exclusive lock.
+ * Prevents race conditions when two check-ins arrive simultaneously.
+ *
+ * @param string   $filepath  Absolute path to the .json file (must already exist).
+ * @param callable $modifier  Receives the decoded array; must return the modified array.
+ *                            May call wp_send_json_error() (which exits) for validation failures.
+ */
+function mmm_locked_event_update( $filepath, $modifier ) {
+    $fp = fopen( $filepath, 'c+' );
+    if ( ! $fp ) {
+        wp_send_json_error( '❌ Could not open event file.' );
+    }
+    if ( ! flock( $fp, LOCK_EX ) ) {
+        fclose( $fp );
+        wp_send_json_error( '❌ Could not lock event file.' );
+    }
+    $event_data = json_decode( stream_get_contents( $fp ), true );
+    if ( ! is_array( $event_data ) ) {
+        flock( $fp, LOCK_UN );
+        fclose( $fp );
+        wp_send_json_error( '❌ Event data is corrupt or unreadable.' );
+    }
+    $event_data = $modifier( $event_data );
+    ftruncate( $fp, 0 );
+    rewind( $fp );
+    fwrite( $fp, json_encode( $event_data ) );
+    flock( $fp, LOCK_UN );
+    fclose( $fp );
+}
+
 
 // Register AJAX check-in handler — both logged-in and public (nopriv) for public scanner page
 add_action('wp_ajax_mmm_checkin', 'mmm_handle_checkin');
@@ -52,22 +100,10 @@ function mmm_handle_checkin() {
     $event_name = sanitize_text_field($_POST['event'] ?? get_option('mmm_current_event', 'Default Event'));
     $upload_dir = wp_upload_dir();
     $events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
-    $filepath   = trailingslashit($events_dir) . sanitize_title_with_dashes($event_name) . '.json';
+    $filepath   = mmm_safe_event_path( $events_dir, sanitize_title_with_dashes( $event_name ) );
 
-    if (!file_exists($filepath)) {
+    if ( ! $filepath || ! file_exists( $filepath ) ) {
         wp_send_json_error('❌ Event file not found.');
-    }
-
-    $event_data = json_decode(file_get_contents($filepath), true);
-
-    if (!isset($event_data['checkins']) || !is_array($event_data['checkins'])) {
-        $event_data['checkins'] = [];
-    }
-
-    foreach ($event_data['checkins'] as $entry) {
-        if (!empty($entry['email']) && $entry['email'] === $user->user_email) {
-            wp_send_json_error("❌ Already checked in as {$user->first_name}.");
-        }
     }
 
     $all_meta = get_user_meta($user->ID);
@@ -83,21 +119,28 @@ function mmm_handle_checkin() {
         'afscme_id'       => $all_meta['afscme_id'][0]       ?? '',
     ];
 
-    $upw = mmm_upw_status_check($custom['member_status'], $user->first_name);
-
-    $event_data['checkins'][] = array_merge([
+    $upw       = mmm_upw_status_check( $custom['member_status'], $user->first_name );
+    $new_entry = array_merge( [
         'first_name' => $user->first_name,
         'last_name'  => $user->last_name,
         'email'      => $user->user_email,
-        'time'       => date_i18n('g:ia, l, F j, Y'),
+        'time'       => date_i18n( 'g:ia, l, F j, Y' ),
         'method'     => 'qr',
         'upw_flag'   => $upw['upw_flag'],
-    ], $custom);
+    ], $custom );
 
-    if (file_put_contents($filepath, json_encode($event_data), LOCK_EX) === false) {
-        error_log("❌ Failed to write to file: $filepath");
-        wp_send_json_error('❌ Could not save check-in.');
-    }
+    mmm_locked_event_update( $filepath, function ( $event_data ) use ( $user, $new_entry ) {
+        if ( ! isset( $event_data['checkins'] ) || ! is_array( $event_data['checkins'] ) ) {
+            $event_data['checkins'] = [];
+        }
+        foreach ( $event_data['checkins'] as $entry ) {
+            if ( ! empty( $entry['email'] ) && $entry['email'] === $user->user_email ) {
+                wp_send_json_error( "❌ Already checked in as {$user->first_name}." );
+            }
+        }
+        $event_data['checkins'][] = $new_entry;
+        return $event_data;
+    } );
 
     $message = $upw['warning']
         ? $upw['message']
@@ -289,57 +332,60 @@ function mmm_checkin_by_phone() {
     }
 
     $upload_dir = wp_upload_dir();
-    $filepath   = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events/' . $event_slug . '.json';
+    $events_dir = trailingslashit( $upload_dir['basedir'] ) . 'mmm-event-checkin/events';
+    $filepath   = mmm_safe_event_path( $events_dir, $event_slug );
 
-    if (!file_exists($filepath)) {
+    if ( ! $filepath || ! file_exists( $filepath ) ) {
         wp_send_json_error('❌ Event not found.');
     }
 
-    $event_data = json_decode(file_get_contents($filepath), true);
-    $guest      = $event_data['guests'][$idx] ?? null;
+    $upw        = null;
+    $guest_name = '';
 
-    if (!$guest) {
-        wp_send_json_error('❌ Guest record not found.');
-    }
-
-    if (!isset($event_data['checkins']) || !is_array($event_data['checkins'])) {
-        $event_data['checkins'] = [];
-    }
-
-    foreach ($event_data['checkins'] as $entry) {
-        if (!empty($entry['phone']) && mmm_normalize_phone($entry['phone']) === $phone) {
-            wp_send_json_error("❌ {$guest['first_name']} is already checked in.");
+    mmm_locked_event_update( $filepath, function ( $event_data ) use ( $idx, $phone, &$upw, &$guest_name ) {
+        $guest = $event_data['guests'][$idx] ?? null;
+        if ( ! $guest ) {
+            wp_send_json_error( '❌ Guest record not found.' );
         }
-    }
 
-    $upw = mmm_upw_status_check($guest['member_status'] ?? '', $guest['first_name'] ?? '');
+        if ( ! isset( $event_data['checkins'] ) || ! is_array( $event_data['checkins'] ) ) {
+            $event_data['checkins'] = [];
+        }
 
-    $event_data['checkins'][] = [
-        'first_name'     => $guest['first_name']     ?? '',
-        'last_name'      => $guest['last_name']       ?? '',
-        'phone'          => $phone,
-        'email'          => $guest['email']           ?? '',
-        'bargaining_unit'=> $guest['bargaining_unit'] ?? '',
-        'unit_number'    => $guest['unit_number']     ?? '',
-        'employer'       => $guest['employer']        ?? '',
-        'jurisdiction'   => $guest['jurisdiction']    ?? '',
-        'job_title'      => $guest['job_title']       ?? '',
-        'baseyard'       => $guest['baseyard']        ?? '',
-        'island'         => $guest['island']          ?? '',
-        'member_status'  => $guest['member_status']   ?? '',
-        'afscme_id'      => $guest['afscme_id']       ?? '',
-        'time'           => date_i18n('g:ia, l, F j, Y'),
-        'method'         => 'phone',
-        'upw_flag'       => $upw['upw_flag'],
-    ];
+        foreach ( $event_data['checkins'] as $entry ) {
+            if ( ! empty( $entry['phone'] ) && mmm_normalize_phone( $entry['phone'] ) === $phone ) {
+                wp_send_json_error( "❌ {$guest['first_name']} is already checked in." );
+            }
+        }
 
-    if (file_put_contents($filepath, json_encode($event_data), LOCK_EX) === false) {
-        wp_send_json_error('❌ Could not save check-in.');
-    }
+        $upw        = mmm_upw_status_check( $guest['member_status'] ?? '', $guest['first_name'] ?? '' );
+        $guest_name = $guest['first_name'] ?? '';
+
+        $event_data['checkins'][] = [
+            'first_name'      => $guest['first_name']      ?? '',
+            'last_name'       => $guest['last_name']        ?? '',
+            'phone'           => $phone,
+            'email'           => $guest['email']            ?? '',
+            'bargaining_unit' => $guest['bargaining_unit']  ?? '',
+            'unit_number'     => $guest['unit_number']      ?? '',
+            'employer'        => $guest['employer']         ?? '',
+            'jurisdiction'    => $guest['jurisdiction']     ?? '',
+            'job_title'       => $guest['job_title']        ?? '',
+            'baseyard'        => $guest['baseyard']         ?? '',
+            'island'          => $guest['island']           ?? '',
+            'member_status'   => $guest['member_status']    ?? '',
+            'afscme_id'       => $guest['afscme_id']        ?? '',
+            'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'method'          => 'phone',
+            'upw_flag'        => $upw['upw_flag'],
+        ];
+
+        return $event_data;
+    } );
 
     $message = $upw['warning']
         ? $upw['message']
-        : "✅ Welcome {$guest['first_name']}, you are now checked in.";
+        : "✅ Welcome {$guest_name}, you are now checked in.";
 
     wp_send_json_success(['message' => $message, 'warning' => $upw['warning']]);
 }
@@ -375,6 +421,11 @@ function mmm_ajax_preview_guest_csv() {
 
     foreach (glob($tmp_dir . '/*.csv') ?: [] as $old) {
         if (filemtime($old) < time() - 7200) unlink($old);
+    }
+
+    // Reject oversized uploads before they hit disk (defence-in-depth; also checked after move)
+    if ( ! empty( $file['size'] ) && $file['size'] > 10 * 1024 * 1024 ) {
+        wp_send_json_error( 'File too large. Maximum 10MB.' );
     }
 
     $temp_key  = bin2hex(random_bytes(16));
@@ -456,9 +507,9 @@ function mmm_ajax_import_guest_csv() {
     }
 
     $events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
-    $guest_path = trailingslashit($events_dir) . sanitize_title_with_dashes($event_name) . '.json';
+    $guest_path = mmm_safe_event_path( $events_dir, sanitize_title_with_dashes( $event_name ) );
 
-    if (!file_exists($guest_path)) {
+    if ( ! $guest_path || ! file_exists( $guest_path ) ) {
         unlink($temp_path);
         wp_send_json_error('Event not found.');
     }
@@ -528,9 +579,10 @@ function mmm_ajax_import_guest_csv() {
     unlink($temp_path);
 
     // ── Write updated event JSON ─────────────────────────────────────
-    $event_data           = json_decode(file_get_contents($guest_path), true);
-    $event_data['guests'] = $guests;
-    file_put_contents($guest_path, json_encode($event_data), LOCK_EX);
+    mmm_locked_event_update( $guest_path, function ( $event_data ) use ( $guests ) {
+        $event_data['guests'] = $guests;
+        return $event_data;
+    } );
 
     // ── Write phone index flat file (fast lookup, avoids reloading full JSON) ──
     $event_slug = sanitize_title_with_dashes($event_name);
