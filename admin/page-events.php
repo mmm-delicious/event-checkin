@@ -92,7 +92,7 @@ function mmm_render_event_list() {
             fputcsv($output, [
                 'First Name', 'Last Name', 'Bargaining Unit', 'Unit', 'Employer',
                 'Jurisdiction', 'Job Title', 'Baseyard', 'Island', 'Member Status',
-                'AFSCME ID', 'Phone', 'Check-In Method', 'Checked in Time'
+                'AFSCME ID', 'Phone', 'Check-In Method', 'Checked in Time', 'UPW Flag'
             ]);
 
             foreach ($checkins as $entry) {
@@ -111,6 +111,7 @@ function mmm_render_event_list() {
                     $entry['phone'] ?? '',
                     $entry['method'] ?? 'qr',
                     $entry['time'] ?? '',
+                    $entry['upw_flag'] ?? '',
                 ]);
             }
 

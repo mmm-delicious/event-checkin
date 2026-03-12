@@ -40,11 +40,19 @@ function mmm_render_guest_list_page() {
             // Build lookup: who is checked in — by qr_id/afscme_id and by name
             $checked_by_id   = [];
             $checked_by_name = [];
+            $flag_by_id      = [];
+            $flag_by_name    = [];
             foreach ($checkins as $ci) {
                 $aid = strtolower(trim($ci['afscme_id'] ?? ''));
-                if ($aid) $checked_by_id[$aid] = $ci['time'] ?? '';
-                $nm  = strtolower(trim(($ci['first_name'] ?? '') . ' ' . ($ci['last_name'] ?? '')));
-                if ($nm !== ' ') $checked_by_name[$nm] = $ci['time'] ?? '';
+                if ($aid) {
+                    $checked_by_id[$aid] = $ci['time'] ?? '';
+                    $flag_by_id[$aid]    = $ci['upw_flag'] ?? '';
+                }
+                $nm = strtolower(trim(($ci['first_name'] ?? '') . ' ' . ($ci['last_name'] ?? '')));
+                if ($nm !== ' ') {
+                    $checked_by_name[$nm] = $ci['time'] ?? '';
+                    $flag_by_name[$nm]    = $ci['upw_flag'] ?? '';
+                }
             }
 
             $total   = count($guests);
@@ -52,6 +60,13 @@ function mmm_render_guest_list_page() {
             foreach ($guests as $g) {
                 if (mmm_guest_is_checked_in($g, $checked_by_id, $checked_by_name)) $checked++;
             }
+
+            // Pagination — 100 guests per page
+            $per_page     = 100;
+            $current_page = max(1, (int) ($_GET['paged'] ?? 1));
+            $total_pages  = max(1, (int) ceil($total / $per_page));
+            $current_page = min($current_page, $total_pages);
+            $page_guests  = array_slice($guests, ($current_page - 1) * $per_page, $per_page, true);
         ?>
 
         <p id="mmm-checkin-summary">
@@ -60,6 +75,24 @@ function mmm_render_guest_list_page() {
             <span style="color:#2e7d32; font-weight:600;"><span class="mmm-checked"><?= $checked; ?></span> checked in</span>,
             <span style="color:#999;"><span class="mmm-remaining"><?= ($total - $checked); ?></span> remaining</span>
         </p>
+
+        <?php if ($total_pages > 1): ?>
+        <div style="margin:10px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="color:#555;">Page <?= $current_page; ?> of <?= $total_pages; ?> &mdash; showing guests <?= number_format(($current_page-1)*$per_page+1); ?>–<?= number_format(min($current_page*$per_page, $total)); ?></span>
+            <?php if ($current_page > 1): ?>
+            <a class="button" href="<?= esc_url(add_query_arg('paged', $current_page - 1)); ?>">&#8592; Prev</a>
+            <?php endif; ?>
+            <?php if ($current_page < $total_pages): ?>
+            <a class="button" href="<?= esc_url(add_query_arg('paged', $current_page + 1)); ?>">Next &#8594;</a>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+
+        <style>
+            .mmm-upw-row { background: #fffbeb !important; }
+            .mmm-upw-row td { border-left: 3px solid #f59e0b; }
+            .mmm-upw-badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:700; padding:1px 6px; border-radius:4px; border:1px solid #f59e0b; margin-left:4px; vertical-align:middle; }
+        </style>
 
         <table class="widefat fixed striped" style="margin-top:12px;">
             <thead>
@@ -72,14 +105,17 @@ function mmm_render_guest_list_page() {
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($guests as $idx => $guest):
+            <?php foreach ($page_guests as $idx => $guest):
                 $is_checked = mmm_guest_is_checked_in($guest, $checked_by_id, $checked_by_name);
                 $name       = trim(($guest['first_name'] ?? '') . ' ' . ($guest['last_name'] ?? ''));
                 $aid_key    = strtolower(trim($guest['qr_id'] ?? ''));
                 $name_key   = strtolower($name);
                 $time_in    = $checked_by_id[$aid_key] ?? $checked_by_name[$name_key] ?? '';
+                $upw_flag   = $flag_by_id[$aid_key] ?? $flag_by_name[$name_key] ?? '';
+                $row_class  = ($is_checked && $upw_flag) ? 'mmm-upw-row' : '';
             ?>
                 <tr id="guest-row-<?= $idx; ?>"
+                    class="<?= esc_attr($row_class); ?>"
                     data-idx="<?= esc_attr($idx); ?>"
                     data-event="<?= esc_attr($selected); ?>"
                     data-checkin-nonce="<?= wp_create_nonce('mmm_manual_checkin'); ?>"
@@ -90,6 +126,9 @@ function mmm_render_guest_list_page() {
                     <td id="guest-status-<?= $idx; ?>">
                         <?php if ($is_checked): ?>
                             <span style="color:#2e7d32; font-weight:600;">&#10003; <?= esc_html($time_in); ?></span>
+                            <?php if ($upw_flag): ?>
+                            <span class="mmm-upw-badge" title="UPW member status flag">&#9888; <?= esc_html($upw_flag); ?></span>
+                            <?php endif; ?>
                         <?php else: ?>
                             <span style="color:#999;">Not checked in</span>
                         <?php endif; ?>
