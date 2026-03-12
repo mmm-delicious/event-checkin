@@ -207,6 +207,9 @@ $site_icon   = get_site_icon_url(128);
       border-radius: 12px;
       color: #222;
       line-height: 1;
+      touch-action: manipulation; /* prevents double-tap zoom on iOS Safari */
+      user-select: none;
+      -webkit-user-select: none;
     }
     #phone-display.has-value { border-color: #0073aa; color: #0073aa; }
     #phone-display.ph        { color: #94a3b8; font-size: 1.2rem; font-weight: 400; letter-spacing: 1px; }

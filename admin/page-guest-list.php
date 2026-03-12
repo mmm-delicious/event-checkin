@@ -414,8 +414,12 @@ function mmm_ajax_undo_checkin() {
             function ( $ci ) use ( $aid, $nm ) {
                 $ci_aid = strtolower( trim( $ci['afscme_id'] ?? '' ) );
                 $ci_nm  = strtolower( trim( ( $ci['first_name'] ?? '' ) . ' ' . ( $ci['last_name'] ?? '' ) ) );
-                if ( $aid ) return $ci_aid !== $aid;
-                return $ci_nm !== $nm;
+                // Remove entries matching by ID OR by name — mirrors mmm_guest_is_checked_in logic.
+                // Matching both catches phone check-ins (stored with afscme_id:'') and any other
+                // entry where the ID field was empty.
+                if ( $aid && $ci_aid === $aid ) return false;
+                if ( $nm !== ' ' && $ci_nm === $nm ) return false;
+                return true;
             }
         ) );
 
