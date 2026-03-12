@@ -93,6 +93,9 @@ mmm-event-checkin/
 
 ## Changelog
 
+### 3.6.2
+- Fix: Admin guest list "Remove Check-In" button was displaying `[object Object]` instead of a valid status message. The `mmm_ajax_poll_checkins` AJAX handler was returning check-in state as an array `{time, flag}` per guest index, but the polling JavaScript in the guest list page expected a plain time string. The PHP response now correctly returns a flat time string per guest index, matching what the JavaScript expects.
+
 ### 3.0.0
 - Add guest list CSV upload per event — import expected attendees without requiring WP user accounts
 - Add phone number check-in with custom phone dialpad UI (no system keyboard) and name confirmation screen

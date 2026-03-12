@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MMM Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.6.1
+ * Version: 3.6.2
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -23,7 +23,7 @@ $mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateCh
 $mmm_eci_updater->setBranch('main');
 
 // Constants
-define('MMM_ECI_VERSION', '3.6.1');
+define('MMM_ECI_VERSION', '3.6.2');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -627,13 +627,10 @@ function mmm_ajax_poll_checkins() {
     $state = [];
     foreach ($guests as $idx => $guest) {
         if (mmm_guest_is_checked_in($guest, $checked_by_id, $checked_by_name)) {
-            $aid_key  = strtolower(trim($guest['qr_id'] ?? ''));
-            $nm_key   = strtolower(trim(($guest['first_name'] ?? '') . ' ' . ($guest['last_name'] ?? '')));
-            $ci_info  = $checked_by_name[$nm_key] ?? null;
-            $state[$idx] = [
-                'time' => $checked_by_id[$aid_key] ?? ($ci_info['time'] ?? ''),
-                'flag' => $ci_info['flag'] ?? '',
-            ];
+            $aid_key = strtolower(trim($guest['qr_id'] ?? ''));
+            $nm_key  = strtolower(trim(($guest['first_name'] ?? '') . ' ' . ($guest['last_name'] ?? '')));
+            $ci_info = $checked_by_name[$nm_key] ?? null;
+            $state[$idx] = $checked_by_id[$aid_key] ?? ($ci_info['time'] ?? '');
         }
     }
 
