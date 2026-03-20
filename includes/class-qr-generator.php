@@ -17,22 +17,34 @@ class MMM_QR_Generator
         return '<img src="' . esc_url($qr_url) . '" alt="QR Code" />';
     }
 
+    /**
+     * Build (or return cached) token → user_id index.
+     * Accepts N+1 on first build; subsequent calls within the TTL are O(1).
+     * Invalidate by deleting the 'mmm_token_index' transient (e.g. after user import).
+     */
+    private static function get_token_index()
+    {
+        $cached = get_transient('mmm_token_index');
+        if ($cached !== false) return $cached;
+
+        $users = get_users(['fields' => ['ID', 'user_login']]);
+        $index = [];
+        foreach ($users as $u) {
+            $afscme_id = get_user_meta($u->ID, 'afscme_id', true);
+            $token = !empty($afscme_id)
+                ? hash('sha256', 'afscme:' . $afscme_id)
+                : hash('sha256', $u->ID . '|' . $u->user_login);
+            $index[$token] = $u->ID;
+        }
+
+        set_transient('mmm_token_index', $index, HOUR_IN_SECONDS);
+        return $index;
+    }
+
     public static function get_user_by_token($token)
     {
-        $users = get_users();
-        foreach ($users as $user) {
-            $afscme_id = get_user_meta($user->ID, 'afscme_id', true);
-
-            // Match against afscme_id if present
-            if (!empty($afscme_id)) {
-                $expected = hash('sha256', 'afscme:' . $afscme_id);
-                if (hash_equals($expected, $token)) return $user;
-            }
-
-            // Fallback to ID|login
-            $fallback = hash('sha256', $user->ID . '|' . $user->user_login);
-            if (hash_equals($fallback, $token)) return $user;
-        }
-        return null;
+        $index = self::get_token_index();
+        if (!isset($index[$token])) return null;
+        return get_user_by('id', $index[$token]);
     }
 }
