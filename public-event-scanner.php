@@ -185,7 +185,18 @@ $site_icon   = get_site_icon_url(128);
       overflow: hidden;
       position: relative;
     }
-    #qr-scanner video { width: 100% !important; height: 100% !important; object-fit: cover; }
+    #qr-scanner video { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
+
+    #qr-guide {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 78%; height: 42%;
+      border: 2px solid rgba(255,255,255,0.9);
+      border-radius: 6px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.40);
+      pointer-events: none;
+    }
 
     /* ── Phone screen ────────────────────────────────────── */
     #screen-phone { padding: 12px 20px 16px; }
@@ -389,7 +400,10 @@ $site_icon   = get_site_icon_url(128);
       <label for="camera-selector">Camera: </label>
       <select id="camera-selector"></select>
     </div>
-    <div id="qr-scanner"></div>
+    <div id="qr-scanner">
+      <video id="qr-video" playsinline autoplay muted></video>
+      <div id="qr-guide"></div>
+    </div>
   </div>
 
   <?php if ($has_guests): ?>
@@ -434,7 +448,6 @@ $site_icon   = get_site_icon_url(128);
 <audio id="snd-ok"  preload="auto"><source src="<?php echo esc_url($plugin_url . 'assets/audio/success.mp3'); ?>" type="audio/mpeg"></audio>
 <audio id="snd-err" preload="auto"><source src="<?php echo esc_url($plugin_url . 'assets/audio/error.mp3');   ?>" type="audio/mpeg"></audio>
 
-<script src="<?php echo esc_url($plugin_url . 'assets/js/html5-qrcode.min.js'); ?>"></script>
 <script>
 (function () {
 'use strict';
@@ -475,37 +488,74 @@ function handleResponse(res, onDone) {
   if (onDone) onDone();
 }
 
-// ── QR Scanner ────────────────────────────────────────────────────────
-var startBtn      = document.getElementById('start-camera-btn');
-var camControls   = document.getElementById('scanner-controls');
-var camSelect     = document.getElementById('camera-selector');
-var qr            = new Html5Qrcode('qr-scanner', {
-    formatsToSupport: [
-        Html5QrcodeSupportedFormats.QR_CODE,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.ITF,
-        Html5QrcodeSupportedFormats.DATA_MATRIX,
-    ]
+// ── QR Scanner (BarcodeDetector) ──────────────────────────────────────
+var startBtn     = document.getElementById('start-camera-btn');
+var camControls  = document.getElementById('scanner-controls');
+var camSelect    = document.getElementById('camera-selector');
+var video        = document.getElementById('qr-video');
+var detector     = new BarcodeDetector({
+  formats: ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix']
 });
-var qrLocked      = false;
-var qrRunning     = false;
-var qrDeviceId    = null;
+var qrLocked     = false;
+var qrRunning    = false;
+var qrStream     = null;
+var qrRafId      = null;
+var qrDeviceId   = null;
+var scanInFlight = false;
 
-function startQr(id) {
+function scanLoop() {
+  if (!qrRunning) return;
+  if (!scanInFlight && !qrLocked && video.readyState >= 2) {
+    scanInFlight = true;
+    detector.detect(video)
+      .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })
+      .catch(function () {})
+      .finally(function () { scanInFlight = false; });
+  }
+  qrRafId = requestAnimationFrame(scanLoop);
+}
+
+function startQr(deviceId) {
   if (qrRunning) return;
-  qr.start(id, { fps: 10, qrbox: { width: 280, height: 100 } }, handleScan)
-    .then(function () {
-      qrRunning = true;
+  var constraint = deviceId
+    ? { video: { deviceId: { exact: deviceId } } }
+    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+  navigator.mediaDevices.getUserMedia(constraint)
+    .then(function (stream) {
+      qrStream        = stream;
+      video.srcObject = stream;
+      qrRunning       = true;
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';
-      var opt = camSelect.options[camSelect.selectedIndex];
-      var lbl = opt ? opt.text.toLowerCase() : '';
-      var vid = document.querySelector('#qr-scanner video');
-      if (vid) vid.style.transform = lbl.includes('front') ? 'scaleX(-1)' : '';
+      var track = stream.getVideoTracks()[0];
+      video.style.transform = (track.label || '').toLowerCase().includes('front') ? 'scaleX(-1)' : '';
+      // Build camera selector after permission is granted (labels are now populated)
+      if (!qrDeviceId) {
+        qrDeviceId = track.getSettings().deviceId || 'default';
+        navigator.mediaDevices.enumerateDevices().then(function (devices) {
+          var cams = devices.filter(function (d) { return d.kind === 'videoinput'; });
+          if (cams.length < 2) return;
+          cams.sort(function (a, b) {
+            var score = function (l) {
+              l = (l || '').toLowerCase();
+              return l.includes('front') ? 10 : (l.includes('ultra') || l.includes('0.5')) ? 5 : (l.includes('back') || l.includes('rear')) ? 0 : 3;
+            };
+            return score(a.label) - score(b.label);
+          });
+          cams.forEach(function (cam, i) {
+            var o = document.createElement('option');
+            o.value = cam.deviceId;
+            o.text  = cam.label || ('Camera ' + (i + 1));
+            if (cam.deviceId === qrDeviceId) o.selected = true;
+            camSelect.appendChild(o);
+          });
+          camControls.style.display = 'block';
+          camSelect.addEventListener('change', function () {
+            qrDeviceId = this.value;
+            if (qrRunning) { stopQr(); startQr(qrDeviceId); }
+          });
+        });
+      }
+      qrRafId = requestAnimationFrame(scanLoop);
     })
     .catch(function (e) {
       console.warn('QR start:', e);
@@ -515,9 +565,11 @@ function startQr(id) {
 
 function stopQr() {
   if (!qrRunning) return;
-  qr.stop()
-    .then(function () { qrRunning = false; startBtn.textContent = '\uD83D\uDCF7 Start Camera'; })
-    .catch(function (e) { console.warn('QR stop:', e); });
+  if (qrRafId)  { cancelAnimationFrame(qrRafId); qrRafId = null; }
+  if (qrStream) { qrStream.getTracks().forEach(function (t) { t.stop(); }); qrStream = null; }
+  video.srcObject = null;
+  qrRunning = false;
+  startBtn.textContent = '\uD83D\uDCF7 Start Camera';
 }
 
 function handleScan(decoded) {
@@ -533,35 +585,7 @@ function handleScan(decoded) {
 startBtn.addEventListener('click', function () {
   if (qrRunning) { stopQr(); return; }
   if (qrDeviceId) { startQr(qrDeviceId); return; }
-  Html5Qrcode.getCameras().then(function (devices) {
-    if (!devices.length) { startBtn.textContent = 'No camera found'; return; }
-    devices.sort(function (a, b) {
-      var s = function (l) {
-        l = (l || '').toLowerCase();
-        if (l.includes('front'))                       return 10;
-        if (l.includes('ultra') || l.includes('0.5')) return 5;
-        if (l.includes('back')  || l.includes('rear')) return 0;
-        return 3;
-      };
-      return s(a.label) - s(b.label);
-    });
-    devices.forEach(function (cam, i) {
-      var o = document.createElement('option');
-      o.value = cam.id;
-      o.text  = cam.label || ('Camera ' + (i + 1));
-      camSelect.appendChild(o);
-    });
-    if (devices.length > 1) camControls.style.display = 'block';
-    qrDeviceId = devices[0].id;
-    camSelect.addEventListener('change', function () {
-      qrDeviceId = this.value;
-      if (qrRunning) qr.stop().then(function () { qrRunning = false; startQr(qrDeviceId); });
-    });
-    startQr(qrDeviceId);
-  }).catch(function (e) {
-    console.warn('Camera:', e);
-    startBtn.textContent = 'Camera access denied';
-  });
+  startQr(null); // first tap — getUserMedia prompts permission; enumeration happens inside startQr
 });
 
 if (HAS_GUESTS) {

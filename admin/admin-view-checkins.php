@@ -37,13 +37,15 @@ function mmm_render_checkin_view_page() {
             </div>
 
             <!-- Charts Row -->
-            <div style="display:flex; gap:20px; margin-bottom:24px; flex-wrap:wrap; align-items:flex-start;">
-                <div style="flex:0 0 280px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px;">
-                    <h3 style="margin:0 0 12px; font-size:1rem;">Check-In Progress</h3>
-                    <canvas id="chart-doughnut" width="250" height="250"></canvas>
+            <div style="display:flex; gap:20px; margin-bottom:24px; flex-wrap:wrap; align-items:stretch; min-height:320px;">
+                <div style="flex:0 0 280px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px; display:flex; flex-direction:column;">
+                    <h3 style="margin:0 0 12px; font-size:1rem; flex-shrink:0;">Check-In Progress</h3>
+                    <div style="flex:1; position:relative;">
+                        <canvas id="chart-doughnut"></canvas>
+                    </div>
                 </div>
-                <div style="flex:1 1 360px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px;">
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                <div style="flex:1 1 360px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px; display:flex; flex-direction:column;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; flex-shrink:0;">
                         <h3 style="margin:0; font-size:1rem;">Breakdown by:</h3>
                         <select id="chart-breakdown-field" style="padding:3px 8px;">
                             <option value="bargaining_unit">Unit Name</option>
@@ -55,7 +57,9 @@ function mmm_render_checkin_view_page() {
                             <option value="method">Method</option>
                         </select>
                     </div>
-                    <canvas id="chart-bar" style="max-height:280px;"></canvas>
+                    <div style="flex:1; position:relative;">
+                        <canvas id="chart-bar"></canvas>
+                    </div>
                 </div>
             </div>
 
@@ -153,7 +157,7 @@ function mmm_render_checkin_view_page() {
                     labels: ['Checked In', 'Not Checked In'],
                     datasets: [{ data: [0, 0], backgroundColor: ['#2e7d32', '#e0e0e0'], borderWidth: 2, borderColor: ['#fff', '#fff'] }]
                 },
-                options: { responsive: false, plugins: { legend: { position: 'bottom' } } }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
             });
 
             var bCtx = document.getElementById('chart-bar').getContext('2d');
@@ -162,6 +166,7 @@ function mmm_render_checkin_view_page() {
                 data: { labels: [], datasets: [{ label: 'Checked In', data: [], backgroundColor: '#2e7d32' }] },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: { y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } } }
                 }
