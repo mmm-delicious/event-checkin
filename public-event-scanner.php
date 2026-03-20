@@ -4,12 +4,13 @@ Template Name: Public Event Scanner
 */
 defined('ABSPATH') || exit;
 
-$event_slug = sanitize_title_with_dashes($_GET['event'] ?? '');
-$upload_dir = wp_upload_dir();
-$events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
-$filepath   = trailingslashit($events_dir) . $event_slug . '.json';
+$event_slug  = sanitize_title_with_dashes($_GET['event'] ?? '');
+$upload_dir  = wp_upload_dir();
+$events_dir  = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
+$meta_path   = trailingslashit($events_dir) . $event_slug . '-meta.json';
+$guests_path = trailingslashit($events_dir) . $event_slug . '-guests.json';
 
-if (!file_exists($filepath)) {
+if (!file_exists($meta_path)) {
     ?><!DOCTYPE html>
     <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Event Not Found</title></head>
@@ -19,15 +20,12 @@ if (!file_exists($filepath)) {
     exit;
 }
 
-// Load event data for display
-$event_data = json_decode(file_get_contents($filepath), true);
-$event_name = $event_data['name'] ?? 'Event';
-$event_date = !empty($event_data['created_at']) ? date('l, F j, Y', strtotime($event_data['created_at'])) : '';
-
-// Determine guest list presence via phones index (avoids keeping full JSON in memory)
-$phones_path = trailingslashit($events_dir) . $event_slug . '.phones.json';
-$has_guests  = file_exists($phones_path) || !empty($event_data['guests']);
-unset($event_data); // free memory — scanner page doesn't need guest records
+// Load meta for display (tiny file — name, created_at, guest_count)
+$event_meta = json_decode(file_get_contents($meta_path), true);
+$event_name = $event_meta['name'] ?? 'Event';
+$event_date = !empty($event_meta['created_at']) ? date('l, F j, Y', strtotime($event_meta['created_at'])) : '';
+$has_guests = ( $event_meta['guest_count'] ?? 0 ) > 0 || file_exists($guests_path);
+unset($event_meta);
 
 $ajax_url    = admin_url('admin-ajax.php');
 $plugin_url  = plugin_dir_url(__FILE__);
