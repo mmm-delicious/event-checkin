@@ -114,12 +114,13 @@ function mmm_render_event_list() {
     // Handle event deletion — deletes all 3 split files + legacy
     if ( ! empty( $_POST['delete_event'] ) ) {
         check_admin_referer( 'mmm_delete_event', 'mmm_delete_nonce' );
-        $slug = sanitize_title_with_dashes( $_POST['delete_event'] );
+        // Use the slug directly (passed from the form); basename() prevents path traversal.
+        $slug = basename( $_POST['delete_event'] );
         $p    = mmm_event_paths( $slug );
         foreach ( [ 'meta', 'guests', 'checkins', 'legacy' ] as $key ) {
             if ( file_exists( $p[ $key ] ) ) unlink( $p[ $key ] );
         }
-        echo '<div class="notice notice-success"><p>Event deleted: <strong>' . esc_html( $_POST['delete_event'] ) . '</strong></p></div>';
+        echo '<div class="notice notice-success"><p>Event deleted: <strong>' . esc_html( $slug ) . '</strong></p></div>';
     }
 
     // Build event list from meta files only — no large guest arrays loaded
@@ -214,7 +215,7 @@ function mmm_render_event_list() {
                     <td>
                         <form method="POST" onsubmit="return confirm('Are you sure you want to delete this event?');">
                             <?php wp_nonce_field( 'mmm_delete_event', 'mmm_delete_nonce' ); ?>
-                            <input type="hidden" name="delete_event" value="<?= esc_attr( $meta['name'] ); ?>">
+                            <input type="hidden" name="delete_event" value="<?= esc_attr( $slug ); ?>">
                             <button type="submit" class="button" style="color:red; font-weight:bold;">&#10007;</button>
                         </form>
                     </td>
