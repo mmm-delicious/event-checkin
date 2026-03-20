@@ -1,102 +1,315 @@
 <?php
 defined('ABSPATH') || exit;
 
-// This file only renders the admin check-in viewer page.
-// QR generator and AJAX handler are now moved to their respective files.
-
 function mmm_render_checkin_view_page() {
-    $upload_dir = wp_upload_dir();
-    $events_dir = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
-    $event_files = glob($events_dir . '/*.json');
-
-    $selected_event = isset($_GET['event']) ? sanitize_text_field($_GET['event']) : '';
+    $events_dir      = mmm_events_dir();
+    $meta_files      = glob( $events_dir . '/*-meta.json' ) ?: [];
+    $selected_event  = isset( $_GET['event'] ) ? sanitize_title_with_dashes( $_GET['event'] ) : '';
+    $dashboard_nonce = wp_create_nonce( 'mmm_dashboard_nonce' );
     ?>
-    <div class="wrap" style="background:#fff; padding: 20px;">
-        <h1 style="margin-bottom: 20px;">🕵️ View Event Check-Ins</h1>
-        <form method="get" style="margin-bottom: 20px;">
+    <div class="wrap" style="background:#fff; padding:20px; max-width:1200px;">
+        <h1>Check-In Monitor</h1>
+
+        <form method="get" style="margin-bottom:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <input type="hidden" name="page" value="mmm_view_checkins" />
-            <label for="event">Select Event:</label>
-            <select name="event" id="event">
+            <label for="mmm-event-select"><strong>Select Event:</strong></label>
+            <select name="event" id="mmm-event-select" style="padding:4px 8px;">
                 <option value="">-- Select an Event --</option>
-                <?php foreach ($event_files as $filepath):
-                    $data = json_decode(file_get_contents($filepath), true);
-                    if (!$data || empty($data['name'])) continue;
-                    $slug = sanitize_title_with_dashes($data['name']);
-                    $selected = ($slug === $selected_event) ? 'selected' : '';
-                    echo '<option value="' . esc_attr($slug) . '" ' . $selected . '>' . esc_html($data['name']) . '</option>';
+                <?php foreach ( $meta_files as $mf ):
+                    $m = json_decode( file_get_contents( $mf ), true );
+                    if ( ! $m || empty( $m['name'] ) ) continue;
+                    $slug = basename( $mf, '-meta.json' );
+                    $sel  = ( $slug === $selected_event ) ? 'selected' : '';
+                    echo '<option value="' . esc_attr( $slug ) . '" ' . $sel . '>' . esc_html( $m['name'] ) . '</option>';
                 endforeach; ?>
             </select>
-            <button type="submit" class="button button-primary" style="margin-left:10px;">Load</button>
+            <button type="submit" class="button button-primary">Load</button>
         </form>
 
-        <div id="checkin-results" style="font-family: sans-serif;">
-            <table style="width:100%; border-collapse: collapse;">
+        <div id="mmm-dashboard" style="display:<?= $selected_event ? 'block' : 'none'; ?>">
+
+            <!-- Stats Bar -->
+            <div style="display:flex; flex-wrap:wrap; gap:24px; background:#f8f8f8; border:1px solid #ddd; border-radius:6px; padding:16px 20px; margin-bottom:20px; font-size:1.05rem;">
+                <div>Total Guests: <strong id="stat-total">—</strong></div>
+                <div style="color:#2e7d32;">Checked In: <strong id="stat-checked">—</strong></div>
+                <div style="color:#777;">Not Checked In: <strong id="stat-not-checked">—</strong></div>
+                <div>Check-In %: <strong id="stat-pct">—</strong></div>
+            </div>
+
+            <!-- Charts Row -->
+            <div style="display:flex; gap:20px; margin-bottom:24px; flex-wrap:wrap; align-items:flex-start;">
+                <div style="flex:0 0 280px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px;">
+                    <h3 style="margin:0 0 12px; font-size:1rem;">Check-In Progress</h3>
+                    <canvas id="chart-doughnut" width="250" height="250"></canvas>
+                </div>
+                <div style="flex:1 1 360px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                        <h3 style="margin:0; font-size:1rem;">Breakdown by:</h3>
+                        <select id="chart-breakdown-field" style="padding:3px 8px;">
+                            <option value="bargaining_unit">Unit Name</option>
+                            <option value="member_status">Member Status</option>
+                            <option value="employer">Employer</option>
+                            <option value="island">Island</option>
+                            <option value="job_title">Job Title</option>
+                            <option value="baseyard">Baseyard</option>
+                            <option value="method">Method</option>
+                        </select>
+                    </div>
+                    <canvas id="chart-bar" style="max-height:280px;"></canvas>
+                </div>
+            </div>
+
+            <!-- Checked-In Guest Table -->
+            <h2 style="margin-bottom:8px;">Checked-In Guests</h2>
+            <table class="widefat fixed striped" id="checkin-table" style="table-layout:auto;">
                 <thead>
-                    <tr style="text-align: left; border-bottom: 2px solid #000;">
-                        <th style="padding: 8px;">First Name</th>
-                        <th style="padding: 8px;">Last Name</th>
-                        <th style="padding: 8px;">Bargaining Unit</th>
-                        <th style="padding: 8px;">Unit</th>
-                        <th style="padding: 8px;">Employer</th>
-                        <th style="padding: 8px;">Jurisdiction</th>
-                        <th style="padding: 8px;">AFSCME ID</th>
-                        <th style="padding: 8px;">Member Status</th>
-                        <th style="padding: 8px;">Method</th>
-                        <th style="padding: 8px;">Check-In Time</th>
+                    <tr>
+                        <?php
+                        $cols = [
+                            'name'            => 'Name',
+                            'afscme_id'       => 'AFSCME ID',
+                            'phone'           => 'Phone',
+                            'bargaining_unit' => 'Unit Name',
+                            'member_status'   => 'Member Status',
+                            'time'            => 'Check-In Time',
+                        ];
+                        foreach ( $cols as $key => $label ): ?>
+                        <th class="mmm-sort-hdr" data-col="<?= esc_attr( $key ); ?>"
+                            style="cursor:pointer; user-select:none; white-space:nowrap; padding:8px 10px;">
+                            <?= esc_html( $label ); ?><span class="sort-arrow" style="font-size:0.75em;"></span>
+                        </th>
+                        <?php endforeach; ?>
                     </tr>
                 </thead>
                 <tbody id="checkin-table-body">
+                    <tr><td colspan="6" style="color:#999; padding:12px;">Loading…</td></tr>
                 </tbody>
             </table>
+            <p style="color:#999; font-size:0.82rem; margin-top:6px;">Auto-refreshes every 10 seconds.</p>
         </div>
     </div>
 
     <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        const event = <?php echo json_encode($selected_event); ?>;
-        if (!event) return;
+    (function () {
+        var EVENT_SLUG      = <?= json_encode( $selected_event ); ?>;
+        var DASHBOARD_NONCE = <?= json_encode( $dashboard_nonce ); ?>;
+        var AJAX_URL        = <?= json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
 
-        function loadCheckins() {
-            fetch("<?php echo admin_url('admin-ajax.php'); ?>?action=mmm_get_checkins&event=" + event)
-                .then(res => res.json())
-                .then(data => {
-                    const tbody = document.getElementById("checkin-table-body");
-                    tbody.innerHTML = "";
-                    data.forEach(row => {
-                        const tr = document.createElement("tr");
-                        const fields = [
-                            row.first_name, row.last_name, row.bargaining_unit,
-                            row.unit_number, row.employer, row.jurisdiction,
-                            row.afscme_id, row.member_status,
-                            row.method ?? 'qr', row.time
-                        ];
-                        fields.forEach(value => {
-                            const td = document.createElement("td");
-                            td.style.padding = "8px";
-                            td.textContent = value ?? '';
-                            tr.appendChild(td);
-                        });
-                        tbody.appendChild(tr);
-                    });
+        if (!EVENT_SLUG) return;
+
+        var sortCol       = 'time';
+        var sortDir       = 'desc';
+        var doughnutChart = null;
+        var barChart      = null;
+        var pollTimer     = null;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            initCharts();
+            fetchDashboard();
+            startPolling();
+
+            document.querySelectorAll('.mmm-sort-hdr').forEach(function (th) {
+                th.addEventListener('click', function () {
+                    var col = this.dataset.col;
+                    if (sortCol === col) {
+                        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortCol = col;
+                        sortDir = 'asc';
+                    }
+                    renderArrows();
+                    renderTable(window._lastCheckins || []);
                 });
+            });
+
+            document.getElementById('chart-breakdown-field').addEventListener('change', function () {
+                updateBarChart(window._lastCheckins || []);
+            });
+        });
+
+        // Pause polling when tab is hidden, resume on show
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                fetchDashboard();
+                startPolling();
+            }
+        });
+
+        function startPolling() {
+            stopPolling();
+            pollTimer = setInterval(fetchDashboard, 10000);
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
-        loadCheckins();
-        setInterval(loadCheckins, 10000);
-    });
+        function initCharts() {
+            var dCtx = document.getElementById('chart-doughnut').getContext('2d');
+            doughnutChart = new Chart(dCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Checked In', 'Not Checked In'],
+                    datasets: [{ data: [0, 0], backgroundColor: ['#2e7d32', '#e0e0e0'], borderWidth: 2, borderColor: ['#fff', '#fff'] }]
+                },
+                options: { responsive: false, plugins: { legend: { position: 'bottom' } } }
+            });
+
+            var bCtx = document.getElementById('chart-bar').getContext('2d');
+            barChart = new Chart(bCtx, {
+                type: 'bar',
+                data: { labels: [], datasets: [{ label: 'Checked In', data: [], backgroundColor: '#2e7d32' }] },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } } }
+                }
+            });
+        }
+
+        function fetchDashboard() {
+            var url = AJAX_URL + '?action=mmm_get_dashboard_data&event=' +
+                      encodeURIComponent(EVENT_SLUG) + '&_wpnonce=' + encodeURIComponent(DASHBOARD_NONCE);
+            fetch(url)
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res.success) return;
+                    var d = res.data;
+
+                    document.getElementById('stat-total').textContent       = d.guests_total;
+                    document.getElementById('stat-checked').textContent     = d.checked_in;
+                    document.getElementById('stat-not-checked').textContent = d.not_checked_in;
+                    document.getElementById('stat-pct').textContent         = d.percentage + '%';
+
+                    // Checkins carry all needed fields (bargaining_unit, member_status, etc.)
+                    // No guests array needed — keeps payload small
+                    var checkins = d.checkins || [];
+                    var enriched = checkins.map(function (ci) {
+                        return {
+                            name:             (((ci.first_name || '') + ' ' + (ci.last_name || '')) + '').trim(),
+                            afscme_id:        ci.afscme_id       || '',
+                            phone:            ci.phone           || '',
+                            bargaining_unit:  ci.bargaining_unit || '',
+                            member_status:    ci.member_status   || '',
+                            time:             ci.time            || '',
+                            method:           ci.method          || 'qr',
+                            employer:         ci.employer        || '',
+                            island:           ci.island          || '',
+                            job_title:        ci.job_title       || '',
+                            baseyard:         ci.baseyard        || '',
+                        };
+                    });
+
+                    window._lastCheckins = enriched;
+
+                    doughnutChart.data.datasets[0].data = [d.checked_in, d.not_checked_in];
+                    doughnutChart.update();
+                    updateBarChart(enriched);
+                    renderTable(enriched);
+                })
+                .catch(function () {});
+        }
+
+        function updateBarChart(checkins) {
+            var field  = document.getElementById('chart-breakdown-field').value;
+            var counts = {};
+            checkins.forEach(function (ci) {
+                var val = ci[field] || '(blank)';
+                counts[val] = (counts[val] || 0) + 1;
+            });
+            var labels = Object.keys(counts).sort();
+            barChart.data.labels           = labels;
+            barChart.data.datasets[0].data = labels.map(function (l) { return counts[l]; });
+            barChart.update();
+        }
+
+        function renderTable(checkins) {
+            var col    = sortCol;
+            var dir    = sortDir;
+            var sorted = checkins.slice().sort(function (a, b) {
+                var va = ((a[col] || '') + '').toLowerCase();
+                var vb = ((b[col] || '') + '').toLowerCase();
+                if (va < vb) return dir === 'asc' ? -1 :  1;
+                if (va > vb) return dir === 'asc' ?  1 : -1;
+                return 0;
+            });
+
+            var tbody = document.getElementById('checkin-table-body');
+            if (!sorted.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="color:#999; padding:12px;">No check-ins yet.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            sorted.forEach(function (row) {
+                var tr = document.createElement('tr');
+                ['name', 'afscme_id', 'phone', 'bargaining_unit', 'member_status', 'time'].forEach(function (key) {
+                    var td = document.createElement('td');
+                    td.style.padding = '7px 10px';
+                    td.textContent   = row[key] || '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderArrows() {
+            document.querySelectorAll('.mmm-sort-hdr').forEach(function (th) {
+                var arrow = th.querySelector('.sort-arrow');
+                if (th.dataset.col === sortCol) {
+                    arrow.textContent = sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
+                } else {
+                    arrow.textContent = '';
+                }
+            });
+        }
+    })();
     </script>
-<?php }
+    <?php
+}
 
-add_action('wp_ajax_mmm_get_checkins', function () {
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('Unauthorized', 403);
+// ── Dashboard data endpoint — returns stats + checkins only (no guests array) ──
+add_action( 'wp_ajax_mmm_get_dashboard_data', 'mmm_ajax_get_dashboard_data' );
+
+function mmm_ajax_get_dashboard_data() {
+    check_ajax_referer( 'mmm_dashboard_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized', 403 );
     }
-    $slug = sanitize_title_with_dashes($_GET['event'] ?? '');
-    $upload_dir = wp_upload_dir();
-    $filepath = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events/' . $slug . '.json';
-    if (!file_exists($filepath)) wp_send_json([]);
 
-    $data = json_decode(file_get_contents($filepath), true);
-    $checkins = $data['checkins'] ?? [];
-    wp_send_json($checkins);
-});
+    $slug = sanitize_title_with_dashes( $_GET['event'] ?? '' );
+    if ( ! $slug ) {
+        wp_send_json_error( 'Missing event.' );
+    }
+    if ( ! mmm_event_exists( $slug ) ) {
+        wp_send_json_error( 'Event not found.' );
+    }
+
+    $meta     = mmm_load_meta( $slug );
+    $checkins = mmm_load_checkins( $slug );
+
+    // Count checked-in using only the checkins file
+    // guest_count comes from meta (no guests file load needed)
+    $checked_in   = count( $checkins );
+    $guests_total = $meta['guest_count'] ?? 0;
+    $not_checked  = max( 0, $guests_total - $checked_in );
+    $percentage   = $guests_total > 0 ? round( ( $checked_in / $guests_total ) * 100, 1 ) : 0;
+
+    wp_send_json_success( [
+        'guests_total'   => $guests_total,
+        'checked_in'     => $checked_in,
+        'not_checked_in' => $not_checked,
+        'percentage'     => $percentage,
+        'checkins'       => $checkins,   // no guests array — keeps payload small
+    ] );
+}
+
+// Legacy endpoint — kept for backward compat, now reads checkins file only
+add_action( 'wp_ajax_mmm_get_checkins', function () {
+    check_ajax_referer( 'mmm_dashboard_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized', 403 );
+    }
+    $slug = sanitize_title_with_dashes( $_GET['event'] ?? '' );
+    wp_send_json( mmm_load_checkins( $slug ) );
+} );
