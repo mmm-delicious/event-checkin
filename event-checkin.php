@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.9.1
+ * Version: 3.10.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -23,7 +23,7 @@ $mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateCh
 $mmm_eci_updater->setBranch('main');
 
 // Constants
-define('MMM_ECI_VERSION', '3.9.1');
+define('MMM_ECI_VERSION', '3.10.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -208,49 +208,88 @@ function mmm_handle_checkin() {
         wp_send_json_error( '❌ No QR code data received.' );
     }
 
-    $token = sanitize_text_field( $_POST['data'] );
-    $user  = MMM_QR_Generator::get_user_by_token( $token );
-
-    if ( ! $user ) {
-        wp_send_json_error( '❌ Invalid QR code.' );
-    }
-
+    $token      = sanitize_text_field( $_POST['data'] );
     $event_name = sanitize_text_field( $_POST['event'] ?? get_option( 'mmm_current_event', 'Default Event' ) );
     $slug       = sanitize_title_with_dashes( $event_name );
 
-    if ( ! mmm_validate_slug( $slug ) || ! mmm_event_exists( $slug ) ) {
-        wp_send_json_error( '❌ Event file not found.' );
+    // ── Path A: plugin-generated QR code (SHA-256 token → WP user) ───────────
+    $user = MMM_QR_Generator::get_user_by_token( $token );
+    if ( $user ) {
+        if ( ! mmm_validate_slug( $slug ) || ! mmm_event_exists( $slug ) ) {
+            wp_send_json_error( '❌ Event file not found.' );
+        }
+        $all_meta  = get_user_meta( $user->ID );
+        $new_entry = [
+            'first_name'      => $user->first_name,
+            'last_name'       => $user->last_name,
+            'email'           => $user->user_email,
+            'afscme_id'       => $all_meta['afscme_id'][0]       ?? '',
+            'member_status'   => $all_meta['member_status'][0]   ?? '',
+            'bargaining_unit' => $all_meta['bargaining_unit'][0] ?? '',
+            'unit_number'     => $all_meta['unit_number'][0]     ?? '',
+            'employer'        => $all_meta['employer'][0]        ?? '',
+            'jurisdiction'    => $all_meta['jurisdiction'][0]    ?? '',
+            'job_title'       => $all_meta['job_title'][0]       ?? '',
+            'baseyard'        => $all_meta['baseyard'][0]        ?? '',
+            'island'          => $all_meta['island'][0]          ?? '',
+            'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'method'          => 'qr',
+        ];
+        mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $user, $new_entry ) {
+            foreach ( $checkins as $entry ) {
+                if ( ! empty( $entry['email'] ) && $entry['email'] === $user->user_email ) {
+                    wp_send_json_error( "❌ Already checked in as {$user->first_name}." );
+                }
+            }
+            $checkins[] = $new_entry;
+            return $checkins;
+        } );
+        wp_send_json_success( "✅ Welcome {$user->first_name}, you are now checked in." );
     }
 
-    $all_meta = get_user_meta( $user->ID );
-    $new_entry = [
-        'first_name'      => $user->first_name,
-        'last_name'       => $user->last_name,
-        'email'           => $user->user_email,
-        'afscme_id'       => $all_meta['afscme_id'][0]       ?? '',
-        'member_status'   => $all_meta['member_status'][0]   ?? '',
-        'bargaining_unit' => $all_meta['bargaining_unit'][0] ?? '',
-        'unit_number'     => $all_meta['unit_number'][0]     ?? '',
-        'employer'        => $all_meta['employer'][0]        ?? '',
-        'jurisdiction'    => $all_meta['jurisdiction'][0]    ?? '',
-        'job_title'       => $all_meta['job_title'][0]       ?? '',
-        'baseyard'        => $all_meta['baseyard'][0]        ?? '',
-        'island'          => $all_meta['island'][0]          ?? '',
-        'time'            => date_i18n( 'g:ia, l, F j, Y' ),
-        'method'          => 'qr',
-    ];
+    // ── Path B: AFSCME card barcode → guest list lookup by qr_id ─────────────
+    if ( ! mmm_validate_slug( $slug ) || ! mmm_event_exists( $slug ) ) {
+        wp_send_json_error( '❌ Invalid QR code.' );
+    }
 
-    mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $user, $new_entry ) {
-        foreach ( $checkins as $entry ) {
-            if ( ! empty( $entry['email'] ) && $entry['email'] === $user->user_email ) {
-                wp_send_json_error( "❌ Already checked in as {$user->first_name}." );
+    $qr_lower   = strtolower( trim( $token ) );
+    $index      = mmm_get_qr_index( $slug );
+    if ( ! isset( $index[ $qr_lower ] ) ) {
+        wp_send_json_error( '❌ Member not found.' );
+    }
+
+    $entry_data = $index[ $qr_lower ];
+    $guest_idx  = $entry_data['idx'];
+    $guest      = $entry_data['guest'];
+    $name       = trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) );
+
+    mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $guest, $guest_idx, $name ) {
+        foreach ( $checkins as $ci ) {
+            if ( isset( $ci['guest_idx'] ) && (int) $ci['guest_idx'] === $guest_idx ) {
+                wp_send_json_error( "❌ Already checked in as {$name}." );
             }
         }
-        $checkins[] = $new_entry;
+        $checkins[] = [
+            'guest_idx'       => $guest_idx,
+            'first_name'      => $guest['first_name']      ?? '',
+            'last_name'       => $guest['last_name']       ?? '',
+            'email'           => $guest['email']           ?? '',
+            'afscme_id'       => $guest['qr_id']           ?? '',
+            'phone'           => $guest['phone']           ?? '',
+            'member_status'   => $guest['member_status']   ?? '',
+            'bargaining_unit' => $guest['bargaining_unit'] ?? '',
+            'unit_number'     => $guest['unit_number']     ?? '',
+            'employer'        => $guest['employer']        ?? '',
+            'jurisdiction'    => $guest['jurisdiction']    ?? '',
+            'baseyard'        => $guest['baseyard']        ?? '',
+            'island'          => $guest['island']          ?? '',
+            'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'method'          => 'qr',
+        ];
         return $checkins;
     } );
 
-    wp_send_json_success( "✅ Welcome {$user->first_name}, you are now checked in." );
+    wp_send_json_success( "✅ Welcome {$name}, you are now checked in." );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -278,6 +317,24 @@ function mmm_get_phone_index( $slug ) {
             'idx'  => $idx,
             'name' => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
         ];
+    }
+
+    set_transient( $cache_key, $index, 12 * HOUR_IN_SECONDS );
+    return $index;
+}
+
+function mmm_get_qr_index( $slug ) {
+    $cache_key = 'mmm_qi_' . $slug;
+    $index     = get_transient( $cache_key );
+    if ( $index !== false ) {
+        return $index;
+    }
+
+    $guests = mmm_load_guests( $slug );
+    $index  = [];
+    foreach ( $guests as $idx => $guest ) {
+        $qr = strtolower( trim( $guest['qr_id'] ?? '' ) );
+        if ( $qr ) $index[ $qr ] = [ 'idx' => $idx, 'guest' => $guest ];
     }
 
     set_transient( $cache_key, $index, 12 * HOUR_IN_SECONDS );
@@ -623,8 +680,9 @@ function mmm_ajax_import_guest_csv() {
         mmm_save_meta( $slug, $meta );
     }
 
-    // Bust phone index cache
+    // Bust phone and QR index caches
     delete_transient( 'mmm_pi_' . $slug );
+    delete_transient( 'mmm_qi_' . $slug );
 
     $msg = count( $guests ) . ' guests imported';
     if ( $skipped ) {

@@ -46,10 +46,9 @@ function mmm_render_guest_list_page() {
         $all_guests = mmm_load_guests( $selected );
         $total_guests = count( $all_guests );
 
-        // Count total checked-in
-        foreach ( $all_guests as $g ) {
-            if ( mmm_guest_is_checked_in( $g, $checked_by_id, $checked_by_name ) ) $total_checked++;
-        }
+        // Count total checked-in — checkins file is the source of truth;
+        // duplicates are prevented at check-in time so count() is accurate.
+        $total_checked = count( $checkins );
 
         // Apply search filter — preserves original array keys
         if ( $search !== '' ) {

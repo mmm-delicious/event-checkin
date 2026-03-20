@@ -106,10 +106,12 @@ function mmm_render_checkin_view_page() {
         var doughnutChart = null;
         var barChart      = null;
         var pollTimer     = null;
+        var tableTimer    = null;
 
         document.addEventListener('DOMContentLoaded', function () {
             initCharts();
             fetchDashboard();
+            fetchTable();
             startPolling();
 
             document.querySelectorAll('.mmm-sort-hdr').forEach(function (th) {
@@ -127,7 +129,7 @@ function mmm_render_checkin_view_page() {
             });
 
             document.getElementById('chart-breakdown-field').addEventListener('change', function () {
-                updateBarChart(window._lastCheckins || []);
+                updateBarChartFromBreakdown(window._lastBreakdown || {});
             });
         });
 
@@ -137,16 +139,19 @@ function mmm_render_checkin_view_page() {
                 stopPolling();
             } else {
                 fetchDashboard();
+                fetchTable();
                 startPolling();
             }
         });
 
         function startPolling() {
             stopPolling();
-            pollTimer = setInterval(fetchDashboard, 10000);
+            pollTimer  = setInterval(fetchDashboard, 10000); // stats + charts every 10 s
+            tableTimer = setInterval(fetchTable,      30000); // table every 30 s
         }
         function stopPolling() {
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            if (pollTimer)  { clearInterval(pollTimer);  pollTimer  = null; }
+            if (tableTimer) { clearInterval(tableTimer); tableTimer = null; }
         }
 
         function initCharts() {
@@ -173,6 +178,7 @@ function mmm_render_checkin_view_page() {
             });
         }
 
+        // Stats + chart poll — tiny payload (~5 KB), runs every 10 s
         function fetchDashboard() {
             var url = AJAX_URL + '?action=mmm_get_dashboard_data&event=' +
                       encodeURIComponent(EVENT_SLUG) + '&_wpnonce=' + encodeURIComponent(DASHBOARD_NONCE);
@@ -181,48 +187,36 @@ function mmm_render_checkin_view_page() {
                 .then(function (res) {
                     if (!res.success) return;
                     var d = res.data;
-
                     document.getElementById('stat-total').textContent       = d.guests_total;
                     document.getElementById('stat-checked').textContent     = d.checked_in;
                     document.getElementById('stat-not-checked').textContent = d.not_checked_in;
                     document.getElementById('stat-pct').textContent         = d.percentage + '%';
-
-                    // Checkins carry all needed fields (bargaining_unit, member_status, etc.)
-                    // No guests array needed — keeps payload small
-                    var checkins = d.checkins || [];
-                    var enriched = checkins.map(function (ci) {
-                        return {
-                            name:             (((ci.first_name || '') + ' ' + (ci.last_name || '')) + '').trim(),
-                            afscme_id:        ci.afscme_id       || '',
-                            phone:            ci.phone           || '',
-                            bargaining_unit:  ci.bargaining_unit || '',
-                            member_status:    ci.member_status   || '',
-                            time:             ci.time            || '',
-                            method:           ci.method          || 'qr',
-                            employer:         ci.employer        || '',
-                            island:           ci.island          || '',
-                            job_title:        ci.job_title       || '',
-                            baseyard:         ci.baseyard        || '',
-                        };
-                    });
-
-                    window._lastCheckins = enriched;
-
                     doughnutChart.data.datasets[0].data = [d.checked_in, d.not_checked_in];
                     doughnutChart.update();
-                    updateBarChart(enriched);
-                    renderTable(enriched);
+                    window._lastBreakdown = d.breakdown || {};
+                    updateBarChartFromBreakdown(window._lastBreakdown);
                 })
                 .catch(function () {});
         }
 
-        function updateBarChart(checkins) {
+        // Table data — separate poll every 30 s, not tied to chart refresh
+        function fetchTable() {
+            var url = AJAX_URL + '?action=mmm_get_checkin_table&event=' +
+                      encodeURIComponent(EVENT_SLUG) + '&_wpnonce=' + encodeURIComponent(DASHBOARD_NONCE);
+            fetch(url)
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res.success) return;
+                    window._lastCheckins = res.data || [];
+                    renderTable(window._lastCheckins);
+                })
+                .catch(function () {});
+        }
+
+        // Uses pre-aggregated server data — no client-side reduction of full checkins array
+        function updateBarChartFromBreakdown(breakdown) {
             var field  = document.getElementById('chart-breakdown-field').value;
-            var counts = {};
-            checkins.forEach(function (ci) {
-                var val = ci[field] || '(blank)';
-                counts[val] = (counts[val] || 0) + 1;
-            });
+            var counts = breakdown[field] || {};
             var labels = Object.keys(counts).sort();
             barChart.data.labels           = labels;
             barChart.data.datasets[0].data = labels.map(function (l) { return counts[l]; });
@@ -300,13 +294,55 @@ function mmm_ajax_get_dashboard_data() {
     $not_checked  = max( 0, $guests_total - $checked_in );
     $percentage   = $guests_total > 0 ? round( ( $checked_in / $guests_total ) * 100, 1 ) : 0;
 
+    // Pre-aggregate breakdown for all chart fields — avoids sending raw checkins array
+    $chart_fields = [ 'bargaining_unit', 'member_status', 'employer', 'island', 'job_title', 'baseyard', 'method' ];
+    $breakdown    = [];
+    foreach ( $chart_fields as $field ) {
+        $counts = [];
+        foreach ( $checkins as $ci ) {
+            $val = trim( $ci[ $field ] ?? '' );
+            if ( $val === '' ) $val = '(blank)';
+            $counts[ $val ] = ( $counts[ $val ] ?? 0 ) + 1;
+        }
+        $breakdown[ $field ] = $counts;
+    }
+
     wp_send_json_success( [
         'guests_total'   => $guests_total,
         'checked_in'     => $checked_in,
         'not_checked_in' => $not_checked,
         'percentage'     => $percentage,
-        'checkins'       => $checkins,   // no guests array — keeps payload small
+        'breakdown'      => $breakdown,   // ~5 KB vs 2–4 MB raw checkins array
     ] );
+}
+
+// ── Checkin table data — separate endpoint, loaded on init and every 30 s ───
+add_action( 'wp_ajax_mmm_get_checkin_table', 'mmm_ajax_get_checkin_table' );
+
+function mmm_ajax_get_checkin_table() {
+    check_ajax_referer( 'mmm_dashboard_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( 'Unauthorized', 403 );
+    }
+
+    $slug = sanitize_title_with_dashes( $_GET['event'] ?? '' );
+    if ( ! $slug || ! mmm_event_exists( $slug ) ) {
+        wp_send_json_error( 'Event not found.' );
+    }
+
+    $checkins = mmm_load_checkins( $slug );
+    $rows     = [];
+    foreach ( $checkins as $ci ) {
+        $rows[] = [
+            'name'            => trim( ( $ci['first_name'] ?? '' ) . ' ' . ( $ci['last_name'] ?? '' ) ),
+            'afscme_id'       => $ci['afscme_id']       ?? '',
+            'phone'           => $ci['phone']           ?? '',
+            'bargaining_unit' => $ci['bargaining_unit'] ?? '',
+            'member_status'   => $ci['member_status']   ?? '',
+            'time'            => $ci['time']            ?? '',
+        ];
+    }
+    wp_send_json_success( $rows );
 }
 
 // Legacy endpoint — kept for backward compat, now reads checkins file only
