@@ -493,15 +493,27 @@ var startBtn     = document.getElementById('start-camera-btn');
 var camControls  = document.getElementById('scanner-controls');
 var camSelect    = document.getElementById('camera-selector');
 var video        = document.getElementById('qr-video');
-var detector     = new BarcodeDetector({
-  formats: ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix']
-});
+var detector     = null; // initialised lazily on first Start Camera tap
 var qrLocked     = false;
 var qrRunning    = false;
 var qrStream     = null;
 var qrRafId      = null;
 var qrDeviceId   = null;
 var scanInFlight = false;
+
+var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix'];
+
+function ensureDetector() {
+  if (detector) return Promise.resolve(detector);
+  if (typeof BarcodeDetector === 'undefined') {
+    return Promise.reject(new Error('BarcodeDetector not supported'));
+  }
+  return BarcodeDetector.getSupportedFormats().then(function (supported) {
+    var formats = WANT_FORMATS.filter(function (f) { return supported.indexOf(f) > -1; });
+    detector = new BarcodeDetector({ formats: formats.length ? formats : ['qr_code'] });
+    return detector;
+  });
+}
 
 function scanLoop() {
   if (!qrRunning) return;
@@ -520,7 +532,8 @@ function startQr(deviceId) {
   var constraint = deviceId
     ? { video: { deviceId: { exact: deviceId } } }
     : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
-  navigator.mediaDevices.getUserMedia(constraint)
+  ensureDetector()
+    .then(function () { return navigator.mediaDevices.getUserMedia(constraint); })
     .then(function (stream) {
       qrStream        = stream;
       video.srcObject = stream;
