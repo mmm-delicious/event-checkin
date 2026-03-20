@@ -88,6 +88,39 @@ $site_icon   = get_site_icon_url(128);
     #app-title { font-size: 1.15rem; font-weight: 700; text-align: center; line-height: 1.2; }
     #app-date  { font-size: 0.78rem; opacity: 0.85; }
 
+    /* ── Connection + queue badges ───────────────────────── */
+    #conn-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      margin-top: 2px;
+    }
+    #conn-badge {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 20px;
+      padding: 3px 9px 3px 6px;
+      font-weight: 600;
+    }
+    #conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      flex-shrink: 0;
+    }
+    #conn-badge.offline #conn-dot { background: #f87171; }
+    #queue-badge {
+      display: none;
+      background: #f59e0b;
+      color: #1c1917;
+      border-radius: 20px;
+      padding: 3px 9px;
+      font-weight: 700;
+    }
+
     /* ── Toggle switch ───────────────────────────────────── */
     #toggle-row {
       flex-shrink: 0;
@@ -381,6 +414,10 @@ $site_icon   = get_site_icon_url(128);
     <?php if ($event_date): ?>
     <div id="app-date"><?php echo esc_html($event_date); ?></div>
     <?php endif; ?>
+    <div id="conn-row">
+      <div id="conn-badge"><div id="conn-dot"></div><span id="conn-label">Online</span></div>
+      <div id="queue-badge"></div>
+    </div>
   </div>
 
   <?php if ($has_guests): ?>
@@ -456,9 +493,72 @@ const AJAX      = <?php echo json_encode($ajax_url); ?>;
 const EVENT     = <?php echo json_encode($event_slug); ?>;
 const DEF_AREA  = <?php echo json_encode($default_area); ?>;
 const HAS_GUESTS = <?php echo $has_guests ? 'true' : 'false'; ?>;
+const QUEUE_KEY  = 'mmm_checkin_queue_' + EVENT;
 
 const sndOk  = document.getElementById('snd-ok');
 const sndErr = document.getElementById('snd-err');
+
+// ── Connection + offline queue ────────────────────────────────────────
+var connBadge  = document.getElementById('conn-badge');
+var connLabel  = document.getElementById('conn-label');
+var queueBadge = document.getElementById('queue-badge');
+
+function updateConnectionBadge() {
+  var online = navigator.onLine;
+  connBadge.classList.toggle('offline', !online);
+  connLabel.textContent = online ? 'Online' : 'Offline';
+}
+
+function updateQueueBadge() {
+  var q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+  if (q.length) {
+    queueBadge.textContent  = q.length + ' queued';
+    queueBadge.style.display = 'block';
+  } else {
+    queueBadge.style.display = 'none';
+  }
+}
+
+function queueCheckin(code) {
+  var q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+  if (q.indexOf(code) === -1) q.push(code);
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  updateQueueBadge();
+}
+
+function submitCheckin(code) {
+  var body = 'action=mmm_checkin&data=' + encodeURIComponent(code) + '&event=' + encodeURIComponent(EVENT);
+  return fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    .then(function (r) { return r.json(); });
+}
+
+function flushQueue() {
+  var q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+  if (!q.length) return;
+  var remaining = [];
+  var promises = q.map(function (code) {
+    return submitCheckin(code).then(function (res) {
+      // already-checked-in is a success for queue purposes — remove from queue
+      if (!res.success && res.data && res.data !== 'Already checked in') {
+        remaining.push(code);
+      }
+    }).catch(function () {
+      remaining.push(code); // network error — keep for next flush
+    });
+  });
+  Promise.all(promises).then(function () {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+    updateQueueBadge();
+  });
+}
+
+// Initialise badge state + flush any queue left from a prior offline session
+updateConnectionBadge();
+updateQueueBadge();
+if (navigator.onLine) { flushQueue(); }
+
+window.addEventListener('online',  function () { updateConnectionBadge(); flushQueue(); });
+window.addEventListener('offline', updateConnectionBadge);
 
 // ── Result overlay ────────────────────────────────────────────────────
 let overlayTimer = null;
@@ -595,9 +695,12 @@ function stopQr() {
 function handleScan(decoded) {
   if (qrLocked) return;
   qrLocked = true;
-  var body = 'action=mmm_checkin&data=' + encodeURIComponent(decoded) + '&event=' + encodeURIComponent(EVENT);
-  fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
-    .then(function (r) { return r.json(); })
+  if (!navigator.onLine) {
+    queueCheckin(decoded);
+    showOverlay('ok', 'Queued \u2014 will sync when back online');
+    return;
+  }
+  submitCheckin(decoded)
     .then(function (res) { handleResponse(res); })
     .catch(function () { showOverlay('err', 'Connection error.'); });
 }
