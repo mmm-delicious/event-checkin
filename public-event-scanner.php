@@ -481,14 +481,26 @@ function handleResponse(res, onDone) {
 var startBtn      = document.getElementById('start-camera-btn');
 var camControls   = document.getElementById('scanner-controls');
 var camSelect     = document.getElementById('camera-selector');
-var qr            = new Html5Qrcode('qr-scanner');
+var qr            = new Html5Qrcode('qr-scanner', {
+    formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+    ]
+});
 var qrLocked      = false;
 var qrRunning     = false;
 var qrDeviceId    = null;
 
 function startQr(id) {
   if (qrRunning) return;
-  qr.start(id, { fps: 10, qrbox: 250 }, handleScan)
+  qr.start(id, { fps: 10, qrbox: { width: 280, height: 100 } }, handleScan)
     .then(function () {
       qrRunning = true;
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';

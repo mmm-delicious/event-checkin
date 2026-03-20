@@ -9,7 +9,7 @@ function mmm_render_guest_list_page() {
     // Pagination / sort / search params (all server-side)
     $per_page   = 100;
     $pg         = max( 1, (int) ( $_GET['pg']     ?? 1 ) );
-    $sort_col   = in_array( $_GET['sort'] ?? '', [ 'first_name', 'last_name', 'qr_id', 'phone', 'bargaining_unit', 'member_status', 'status' ], true )
+    $sort_col   = in_array( $_GET['sort'] ?? '', [ 'first_name', 'last_name', 'status' ], true )
                     ? $_GET['sort'] : 'first_name';
     $sort_dir   = ( $_GET['dir'] ?? '' ) === 'desc' ? 'desc' : 'asc';
     $search     = sanitize_text_field( $_GET['search'] ?? '' );
@@ -56,12 +56,9 @@ function mmm_render_guest_list_page() {
             $sq = strtolower( $search );
             $all_guests = array_filter( $all_guests, function ( $g ) use ( $sq ) {
                 return strpos( strtolower(
-                    ( $g['first_name']      ?? '' ) . ' ' .
-                    ( $g['last_name']       ?? '' ) . ' ' .
-                    ( $g['qr_id']          ?? '' ) . ' ' .
-                    ( $g['phone']          ?? '' ) . ' ' .
-                    ( $g['bargaining_unit'] ?? '' ) . ' ' .
-                    ( $g['member_status']   ?? '' )
+                    ( $g['first_name'] ?? '' ) . ' ' .
+                    ( $g['last_name']  ?? '' ) . ' ' .
+                    ( $g['phone']      ?? '' )
                 ), $sq ) !== false;
             } );
         }
@@ -140,7 +137,7 @@ function mmm_render_guest_list_page() {
                 <input type="hidden" name="pg"    value="1">
                 <input type="text" name="search" id="mmm-search"
                        value="<?= esc_attr( $search ); ?>"
-                       placeholder="Search name, ID, phone, unit, status…"
+                       placeholder="Search name, phone…"
                        style="padding:4px 8px; width:280px; max-width:100%;" />
                 <button type="submit" class="button">Search</button>
                 <?php if ( $search !== '' ): ?>
@@ -165,7 +162,7 @@ function mmm_render_guest_list_page() {
                     <th><?= mmm_sort_link( 'first_name',      'Name',          $sort_col, $sort_dir, $base_url ); ?></th>
                     <th><?= mmm_sort_link( 'qr_id',           'AFSCME ID',     $sort_col, $sort_dir, $base_url ); ?></th>
                     <th><?= mmm_sort_link( 'phone',           'Phone',         $sort_col, $sort_dir, $base_url ); ?></th>
-                    <th><?= mmm_sort_link( 'bargaining_unit', 'Unit Name',     $sort_col, $sort_dir, $base_url ); ?></th>
+                    <th>Baseyard</th>
                     <th><?= mmm_sort_link( 'member_status',   'Member Status', $sort_col, $sort_dir, $base_url ); ?></th>
                     <th>Status</th>
                     <th style="width:180px;">Actions</th>
@@ -193,7 +190,7 @@ function mmm_render_guest_list_page() {
                     <td><?= esc_html( $name ); ?></td>
                     <td><?= esc_html( $guest['qr_id'] ?? '' ); ?></td>
                     <td><?= esc_html( $guest['phone'] ?? '' ); ?></td>
-                    <td><?= esc_html( $guest['bargaining_unit'] ?? '' ); ?></td>
+                    <td><?= esc_html( $guest['baseyard'] ?? '' ); ?></td>
                     <td><?= esc_html( $guest['member_status'] ?? '' ); ?></td>
                     <td id="guest-status-<?= $idx; ?>">
                         <?php if ( $is_checked ): ?>
@@ -536,7 +533,6 @@ function mmm_render_guest_list_page() {
                             row.cells[0].textContent = (fn + ' ' + ln).trim();
                             row.cells[1].textContent = qr;
                             row.cells[2].textContent = ph;
-                            row.cells[3].textContent = bu;
                             row.cells[4].textContent = ms;
                             row.dataset.guest = JSON.stringify({ first_name: fn, last_name: ln, qr_id: qr, phone: ph, member_status: ms, bargaining_unit: bu, is_checked_in: isCI ? '1' : '0' });
 
@@ -620,7 +616,7 @@ function mmm_render_guest_list_page() {
                         tr.setAttribute('data-guest', JSON.stringify({ first_name: fn, last_name: ln, qr_id: qr, phone: ph, member_status: ms, bargaining_unit: bu, is_checked_in: isCI ? '1' : '0' }));
 
                         var fullName = (fn + ' ' + ln).trim();
-                        [fullName, qr, ph, bu, ms].forEach(function (val) {
+                        [fullName, qr, ph, '', ms].forEach(function (val) {
                             var td = document.createElement('td'); td.textContent = val; tr.appendChild(td);
                         });
 
