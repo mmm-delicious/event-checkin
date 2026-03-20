@@ -537,6 +537,9 @@ function startQr(deviceId) {
     .then(function (stream) {
       qrStream        = stream;
       video.srcObject = stream;
+      video.play().catch(function (e) {
+        console.warn('video.play() rejected:', e);
+      });
       qrRunning       = true;
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';
       var track = stream.getVideoTracks()[0];
@@ -573,6 +576,10 @@ function startQr(deviceId) {
     .catch(function (e) {
       console.warn('QR start:', e);
       startBtn.textContent = '\uD83D\uDCF7 Start Camera';
+      var msg = (e && e.name === 'NotAllowedError')
+        ? 'Camera permission denied. Please allow camera access and try again.'
+        : 'Camera failed to start: ' + (e && e.message ? e.message : 'unknown error');
+      showOverlay('err', msg);
     });
 }
 
