@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.11.2
+ * Version: 3.11.3
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -13,8 +13,18 @@
 
 defined('ABSPATH') || exit;
 
+// Auto-updates via GitHub (checks every 48h to minimise plugins-page latency)
+require_once plugin_dir_path(__FILE__) . 'lib/plugin-update-checker/plugin-update-checker.php';
+$mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+    'https://github.com/mmm-delicious/event-checkin/',
+    __FILE__,
+    'event-checkin'
+);
+$mmm_eci_updater->setBranch('main');
+$mmm_eci_updater->setCheckPeriod(48);
+
 // Constants
-define('MMM_ECI_VERSION', '3.11.2');
+define('MMM_ECI_VERSION', '3.11.3');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
