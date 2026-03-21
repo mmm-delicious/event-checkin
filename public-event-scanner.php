@@ -603,43 +603,16 @@ var scanInFlight = false;
 
 var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix'];
 
-// Cached promise for the polyfill script load — prevents double-injection
-var polyfillPromise = null;
-
-function loadPolyfill() {
-  if (polyfillPromise) return polyfillPromise;
-  polyfillPromise = new Promise(function (resolve, reject) {
-    var s = document.createElement('script');
-    // ZBar-WASM polyfill — same BarcodeDetector API, works on iOS Safari
-    s.src = 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.21/dist/index.js';
-    s.onload = function () {
-      typeof BarcodeDetectorPolyfill !== 'undefined'
-        ? resolve(BarcodeDetectorPolyfill)
-        : reject(new Error('Barcode scanner not supported on this device'));
-    };
-    s.onerror = function () { reject(new Error('Could not load barcode scanner')); };
-    document.head.appendChild(s);
-  });
-  return polyfillPromise;
-}
-
 function ensureDetector() {
   if (detector) return Promise.resolve(detector);
-
-  function buildWithClass(Cls) {
-    return Cls.getSupportedFormats().then(function (supported) {
-      var formats = WANT_FORMATS.filter(function (f) { return supported.indexOf(f) > -1; });
-      detector = new Cls({ formats: formats.length ? formats : ['qr_code'] });
-      return detector;
-    });
+  if (typeof BarcodeDetector === 'undefined') {
+    return Promise.reject(new Error('BarcodeDetector not supported'));
   }
-
-  if (typeof BarcodeDetector !== 'undefined') {
-    return buildWithClass(BarcodeDetector);
-  }
-
-  // iOS Safari and other browsers without native BarcodeDetector
-  return loadPolyfill().then(buildWithClass);
+  return BarcodeDetector.getSupportedFormats().then(function (supported) {
+    var formats = WANT_FORMATS.filter(function (f) { return supported.indexOf(f) > -1; });
+    detector = new BarcodeDetector({ formats: formats.length ? formats : ['qr_code'] });
+    return detector;
+  });
 }
 
 function scanLoop() {
