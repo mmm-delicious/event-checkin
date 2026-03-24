@@ -41,6 +41,7 @@ $site_icon   = get_site_icon_url(128);
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <title><?php echo esc_html($event_name); ?></title>
+  <script src="<?php echo esc_url(MMM_ECI_URL . 'assets/js/jsqr.min.js'); ?>"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -603,10 +604,21 @@ var scanInFlight = false;
 
 var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix'];
 
+// jsQR fallback state (iOS Safari / any browser lacking BarcodeDetector)
+var useJsQR    = false;
+var jsQrCanvas = null;
+var jsQrCtx    = null;
+var jsQrLastScan = 0;
+var JS_QR_INTERVAL = 200; // ms — 5fps is sufficient for hand-held QR scanning
+
 function ensureDetector() {
-  if (detector) return Promise.resolve(detector);
+  if (detector || useJsQR) return Promise.resolve(detector);
   if (typeof BarcodeDetector === 'undefined') {
-    return Promise.reject(new Error('BarcodeDetector not supported'));
+    // Safari / iOS — fall back to jsQR canvas decode
+    useJsQR    = true;
+    jsQrCanvas = document.createElement('canvas');
+    jsQrCtx    = jsQrCanvas.getContext('2d');
+    return Promise.resolve();
   }
   return BarcodeDetector.getSupportedFormats().then(function (supported) {
     var formats = WANT_FORMATS.filter(function (f) { return supported.indexOf(f) > -1; });
@@ -617,12 +629,24 @@ function ensureDetector() {
 
 function scanLoop() {
   if (!qrRunning) return;
-  if (!scanInFlight && !qrLocked && video.readyState >= 2) {
-    scanInFlight = true;
-    detector.detect(video)
-      .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })
-      .catch(function () {})
-      .finally(function () { scanInFlight = false; });
+  if (!qrLocked && video.readyState >= 2) {
+    if (useJsQR) {
+      // Throttle to JS_QR_INTERVAL ms — synchronous decode, no scanInFlight needed
+      var now = Date.now();
+      if (now - jsQrLastScan >= JS_QR_INTERVAL) {
+        jsQrLastScan = now;
+        jsQrCtx.drawImage(video, 0, 0, jsQrCanvas.width, jsQrCanvas.height);
+        var imageData = jsQrCtx.getImageData(0, 0, jsQrCanvas.width, jsQrCanvas.height);
+        var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+        if (code && !qrLocked) handleScan(code.data);
+      }
+    } else if (!scanInFlight) {
+      scanInFlight = true;
+      detector.detect(video)
+        .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })
+        .catch(function () {})
+        .finally(function () { scanInFlight = false; });
+    }
   }
   qrRafId = requestAnimationFrame(scanLoop);
 }
@@ -640,7 +664,13 @@ function startQr(deviceId) {
       video.play().catch(function (e) {
         console.warn('video.play() rejected:', e);
       });
-      qrRunning       = true;
+      qrRunning = true;
+      // Set jsQR canvas dimensions once from the actual video track
+      if (useJsQR) {
+        var settings = stream.getVideoTracks()[0].getSettings();
+        jsQrCanvas.width  = settings.width  || 640;
+        jsQrCanvas.height = settings.height || 480;
+      }
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';
       var track = stream.getVideoTracks()[0];
       video.style.transform = (track.label || '').toLowerCase().includes('front') ? 'scaleX(-1)' : '';
