@@ -41,7 +41,8 @@ $site_icon   = get_site_icon_url(128);
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <title><?php echo esc_html($event_name); ?></title>
-  <script src="<?php echo esc_url(MMM_ECI_URL . 'assets/js/jsqr.min.js'); ?>"></script>
+  <!-- BarcodeDetector polyfill: ZXing-C++ WASM — only activates on browsers lacking native BarcodeDetector (Safari/iOS) -->
+  <script defer src="<?php echo esc_url(MMM_ECI_URL . 'assets/js/barcode-detector-polyfill.js'); ?>"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -490,10 +491,11 @@ $site_icon   = get_site_icon_url(128);
 (function () {
 'use strict';
 
-const AJAX      = <?php echo json_encode($ajax_url); ?>;
-const EVENT     = <?php echo json_encode($event_slug); ?>;
-const DEF_AREA  = <?php echo json_encode($default_area); ?>;
+const AJAX       = <?php echo json_encode($ajax_url); ?>;
+const EVENT      = <?php echo json_encode($event_slug); ?>;
+const DEF_AREA   = <?php echo json_encode($default_area); ?>;
 const HAS_GUESTS = <?php echo $has_guests ? 'true' : 'false'; ?>;
+const PLUGIN_URL = <?php echo json_encode($plugin_url); ?>;
 const QUEUE_KEY  = 'mmm_checkin_queue_' + EVENT;
 
 const sndOk  = document.getElementById('snd-ok');
@@ -589,12 +591,12 @@ function handleResponse(res, onDone) {
   if (onDone) onDone();
 }
 
-// ── QR Scanner (BarcodeDetector) ──────────────────────────────────────
+// ── QR / Barcode Scanner (BarcodeDetector — native on Chrome, ZXing-WASM polyfill on Safari) ──
 var startBtn     = document.getElementById('start-camera-btn');
 var camControls  = document.getElementById('scanner-controls');
 var camSelect    = document.getElementById('camera-selector');
 var video        = document.getElementById('qr-video');
-var detector     = null; // initialised lazily on first Start Camera tap
+var detector     = null;
 var qrLocked     = false;
 var qrRunning    = false;
 var qrStream     = null;
@@ -604,21 +606,20 @@ var scanInFlight = false;
 
 var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix'];
 
-// jsQR fallback state (iOS Safari / any browser lacking BarcodeDetector)
-var useJsQR    = false;
-var jsQrCanvas = null;
-var jsQrCtx    = null;
-var jsQrLastScan = 0;
-var JS_QR_INTERVAL = 200; // ms — 5fps is sufficient for hand-held QR scanning
-
 function ensureDetector() {
-  if (detector || useJsQR) return Promise.resolve(detector);
+  if (detector) return Promise.resolve(detector);
   if (typeof BarcodeDetector === 'undefined') {
-    // Safari / iOS — fall back to jsQR canvas decode
-    useJsQR    = true;
-    jsQrCanvas = document.createElement('canvas');
-    jsQrCtx    = jsQrCanvas.getContext('2d');
-    return Promise.resolve();
+    return Promise.reject(new Error('BarcodeDetector not available'));
+  }
+  // Point the ZXing-WASM polyfill to our locally-bundled .wasm file (no CDN dependency)
+  if (typeof BarcodeDetectionAPI !== 'undefined' && BarcodeDetectionAPI.prepareZXingModule) {
+    BarcodeDetectionAPI.prepareZXingModule({
+      overrides: {
+        locateFile: function (path) {
+          return path.endsWith('.wasm') ? PLUGIN_URL + 'assets/js/' + path : path;
+        }
+      }
+    });
   }
   return BarcodeDetector.getSupportedFormats().then(function (supported) {
     var formats = WANT_FORMATS.filter(function (f) { return supported.indexOf(f) > -1; });
@@ -629,41 +630,22 @@ function ensureDetector() {
 
 function scanLoop() {
   if (!qrRunning) return;
-  if (!qrLocked && video.readyState >= 2) {
-    if (useJsQR) {
-      // Throttle to JS_QR_INTERVAL ms — synchronous decode, no scanInFlight needed
-      var now = Date.now();
-      if (now - jsQrLastScan >= JS_QR_INTERVAL) {
-        jsQrLastScan = now;
-        // Use live video dimensions; fall back to previously-set canvas size or safe default
-        var vw = video.videoWidth  || jsQrCanvas.width  || 640;
-        var vh = video.videoHeight || jsQrCanvas.height || 480;
-        if (jsQrCanvas.width !== vw)  jsQrCanvas.width  = vw;
-        if (jsQrCanvas.height !== vh) jsQrCanvas.height = vh;
-        try {
-          jsQrCtx.drawImage(video, 0, 0, vw, vh);
-          var imageData = jsQrCtx.getImageData(0, 0, vw, vh);
-          // 'attemptBoth' handles standard (black-on-white) and inverted (phone dark-mode) QR codes
-          var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-          if (code && !qrLocked) handleScan(code.data);
-        } catch(e) { /* keep loop alive on any jsQR error */ }
-      }
-    } else if (!scanInFlight) {
-      scanInFlight = true;
-      detector.detect(video)
-        .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })
-        .catch(function () {})
-        .finally(function () { scanInFlight = false; });
-    }
+  if (!scanInFlight && !qrLocked && video.readyState >= 2) {
+    scanInFlight = true;
+    detector.detect(video)
+      .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })
+      .catch(function () {})
+      .finally(function () { scanInFlight = false; });
   }
   qrRafId = requestAnimationFrame(scanLoop);
 }
 
 function startQr(deviceId) {
   if (qrRunning) return;
+  // 720p is sufficient for QR and 1D barcodes — 1080p is unnecessary overhead
   var constraint = deviceId
     ? { video: { deviceId: { exact: deviceId } } }
-    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
   ensureDetector()
     .then(function () { return navigator.mediaDevices.getUserMedia(constraint); })
     .then(function (stream) {
@@ -672,13 +654,7 @@ function startQr(deviceId) {
       video.play().catch(function (e) {
         console.warn('video.play() rejected:', e);
       });
-      qrRunning = true;
-      // Set jsQR canvas dimensions once from the actual video track
-      if (useJsQR) {
-        var settings = stream.getVideoTracks()[0].getSettings();
-        jsQrCanvas.width  = settings.width  || 640;
-        jsQrCanvas.height = settings.height || 480;
-      }
+      qrRunning            = true;
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';
       var track = stream.getVideoTracks()[0];
       video.style.transform = (track.label || '').toLowerCase().includes('front') ? 'scaleX(-1)' : '';
