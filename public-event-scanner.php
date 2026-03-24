@@ -635,10 +635,18 @@ function scanLoop() {
       var now = Date.now();
       if (now - jsQrLastScan >= JS_QR_INTERVAL) {
         jsQrLastScan = now;
-        jsQrCtx.drawImage(video, 0, 0, jsQrCanvas.width, jsQrCanvas.height);
-        var imageData = jsQrCtx.getImageData(0, 0, jsQrCanvas.width, jsQrCanvas.height);
-        var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
-        if (code && !qrLocked) handleScan(code.data);
+        // Use live video dimensions; fall back to previously-set canvas size or safe default
+        var vw = video.videoWidth  || jsQrCanvas.width  || 640;
+        var vh = video.videoHeight || jsQrCanvas.height || 480;
+        if (jsQrCanvas.width !== vw)  jsQrCanvas.width  = vw;
+        if (jsQrCanvas.height !== vh) jsQrCanvas.height = vh;
+        try {
+          jsQrCtx.drawImage(video, 0, 0, vw, vh);
+          var imageData = jsQrCtx.getImageData(0, 0, vw, vh);
+          // 'attemptBoth' handles standard (black-on-white) and inverted (phone dark-mode) QR codes
+          var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+          if (code && !qrLocked) handleScan(code.data);
+        } catch(e) { /* keep loop alive on any jsQR error */ }
       }
     } else if (!scanInFlight) {
       scanInFlight = true;
