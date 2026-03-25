@@ -4,6 +4,11 @@ Template Name: Public Event Scanner
 */
 defined('ABSPATH') || exit;
 
+// Enforce HSTS for DL scanning — communicates to browsers to prefer HTTPS
+if (!headers_sent()) {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
+
 $event_slug  = sanitize_title_with_dashes($_GET['event'] ?? '');
 $upload_dir  = wp_upload_dir();
 $events_dir  = trailingslashit($upload_dir['basedir']) . 'mmm-event-checkin/events';
@@ -384,9 +389,15 @@ $site_icon   = get_site_icon_url(128);
     #confirm-name {
       font-size: 1.9rem;
       font-weight: 800;
-      margin: 8px 0 20px;
+      margin: 8px 0 6px;
       color: #0073aa;
       line-height: 1.2;
+    }
+    #confirm-method {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin-bottom: 20px;
+      min-height: 1em;
     }
     .confirm-btns { display: flex; gap: 10px; }
     .confirm-btns button {
@@ -478,6 +489,7 @@ $site_icon   = get_site_icon_url(128);
 <div id="confirm-overlay">
   <h2>Confirm Check-In</h2>
   <div id="confirm-name"></div>
+  <div id="confirm-method"></div>
   <div class="confirm-btns">
     <button id="confirm-no">Cancel</button>
     <button id="confirm-yes">Check In</button>
@@ -604,7 +616,10 @@ var qrRafId      = null;
 var qrDeviceId   = null;
 var scanInFlight = false;
 
-var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix'];
+var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417'];
+
+// Placeholder; assigned inside the HAS_GUESTS block below
+var handleDlScan = null;
 
 function ensureDetector() {
   if (detector) return Promise.resolve(detector);
@@ -706,9 +721,62 @@ function stopQr() {
   startBtn.textContent = '\uD83D\uDCF7 Start Camera';
 }
 
+// ── AAMVA PDF417 helpers ──────────────────────────────────────────────────────
+
+function parseAamva(raw) {
+  if (!raw || raw.charCodeAt(0) !== 64 /* '@' */) return null;
+  if (raw.indexOf('ANSI ') === -1) return null;
+  var fields = {};
+  var lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.length < 4) continue;
+    var key = line.substring(0, 3);
+    if (!/^[A-Z]{3}$/.test(key)) continue;
+    fields[key] = line.substring(3).trim();
+  }
+  var lastName  = (fields['DCS'] || '').replace(/,/g, '').trim();
+  var firstName = fields['DCT'] || fields['DAC'] || '';
+  if (firstName.indexOf(',') !== -1) firstName = firstName.split(',')[0].trim();
+  var dob = fields['DBB'] || '';
+  if (!lastName) return null;
+  return { lastName: lastName, firstName: firstName, dob: dob };
+}
+
+function normalizeDobToIso(dob) {
+  if (!/^\d{8}$/.test(dob)) return '';
+  var mm = dob.substring(0, 2), dd = dob.substring(2, 4), yyyy = dob.substring(4, 8);
+  var mi = parseInt(mm, 10), di = parseInt(dd, 10), yi = parseInt(yyyy, 10);
+  var now = new Date().getFullYear();
+  if (mi < 1 || mi > 12 || di < 1 || di > 31 || yi < 1924 || yi > now - 15) return '';
+  return yyyy + '-' + mm + '-' + dd;
+}
+
+function sha256hex(str) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+    .then(function(buf) {
+      return Array.from(new Uint8Array(buf)).map(function(b) {
+        return b.toString(16).padStart(2, '0');
+      }).join('');
+    });
+}
+
+function normalizeName(name) {
+  return name.toUpperCase().replace(/[^A-Z\-' ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// ── handleScan — routes AAMVA barcodes to DL flow, others to QR flow ─────────
+
 function handleScan(decoded) {
   if (qrLocked) return;
   qrLocked = true;
+
+  // AAMVA driver's licence — only when a guest list is loaded
+  if (HAS_GUESTS && handleDlScan) {
+    var dl = parseAamva(decoded);
+    if (dl) { handleDlScan(dl); return; }
+  }
+
   if (!navigator.onLine) {
     queueCheckin(decoded);
     showOverlay('ok', 'Queued \u2014 will sync when back online');
@@ -744,14 +812,16 @@ if (HAS_GUESTS) {
   var phoneDis  = document.getElementById('phone-display');
   var searchBtn = document.getElementById('phone-search-btn');
   var resultEl  = document.getElementById('phone-result');
-  var backdrop  = document.getElementById('confirm-backdrop');
-  var confirmOv = document.getElementById('confirm-overlay');
-  var confirmNm = document.getElementById('confirm-name');
-  var confirmYes = document.getElementById('confirm-yes');
-  var confirmNo  = document.getElementById('confirm-no');
+  var backdrop     = document.getElementById('confirm-backdrop');
+  var confirmOv    = document.getElementById('confirm-overlay');
+  var confirmNm    = document.getElementById('confirm-name');
+  var confirmMthd  = document.getElementById('confirm-method');
+  var confirmYes   = document.getElementById('confirm-yes');
+  var confirmNo    = document.getElementById('confirm-no');
 
-  var digits  = '';
-  var pending = null;
+  var digits    = '';
+  var pending   = null;
+  var dlPending = null;
 
   function fmt(d) {
     if (d.length > 7) return d.slice(0,3) + '-' + d.slice(3,6) + '-' + d.slice(6);
@@ -791,13 +861,15 @@ if (HAS_GUESTS) {
   function closeConfirm() {
     backdrop.style.display  = 'none';
     confirmOv.style.display = 'none';
-    pending = null;
+    pending   = null;
+    dlPending = null;
   }
 
-  function openConfirm(name) {
-    confirmNm.textContent   = name;
-    backdrop.style.display  = 'block';
-    confirmOv.style.display = 'block';
+  function openConfirm(name, label) {
+    confirmNm.textContent    = name;
+    confirmMthd.textContent  = label || '';
+    backdrop.style.display   = 'block';
+    confirmOv.style.display  = 'block';
   }
 
   backdrop.addEventListener('click', closeConfirm);
@@ -827,6 +899,36 @@ if (HAS_GUESTS) {
   });
 
   confirmYes.addEventListener('click', function () {
+    // ── DL confirmation ──────────────────────────────────────────────────────
+    if (dlPending) {
+      var p = dlPending;
+      confirmYes.disabled = true;
+      confirmNo.disabled  = true;
+      var body = 'action=mmm_confirm_dl_checkin'
+        + '&event='    + encodeURIComponent(EVENT)
+        + '&idx='      + encodeURIComponent(p.idx)
+        + '&dob_hash=' + encodeURIComponent(p.dobHash)
+        + '&token='    + encodeURIComponent(p.token);
+      fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          confirmYes.disabled = false;
+          confirmNo.disabled  = false;
+          closeConfirm();
+          qrLocked = false;
+          handleResponse(res);
+        })
+        .catch(function () {
+          confirmYes.disabled = false;
+          confirmNo.disabled  = false;
+          closeConfirm();
+          showOverlay('err', 'Connection error.');
+          qrLocked = false;
+        });
+      return;
+    }
+
+    // ── Phone confirmation ───────────────────────────────────────────────────
     if (!pending) return;
     confirmYes.disabled = true;
     confirmNo.disabled  = true;
@@ -853,6 +955,48 @@ if (HAS_GUESTS) {
         showOverlay('err', 'Connection error.');
       });
   });
+
+  // ── DL scan handler (assigned here so confirm overlay refs are in scope) ──
+  handleDlScan = function(parsed) {
+    var lastName  = normalizeName(parsed.lastName);
+    var firstName = normalizeName(parsed.firstName);
+
+    if (lastName.length < 2) {
+      showOverlay('err', '❌ License unreadable — try phone entry.');
+      qrLocked = false;
+      return;
+    }
+
+    var dobIso = normalizeDobToIso(parsed.dob);
+    var hashPromise = dobIso ? sha256hex(dobIso) : Promise.resolve('');
+
+    hashPromise.then(function(dobHash) {
+      var body = 'action=mmm_checkin_by_dl'
+        + '&event='      + encodeURIComponent(EVENT)
+        + '&last_name='  + encodeURIComponent(lastName)
+        + '&first_name=' + encodeURIComponent(firstName)
+        + '&dob_hash='   + encodeURIComponent(dobHash);
+      return fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) {
+            showOverlay('err', res.data || '❌ Not found on guest list — try phone entry.');
+            qrLocked = false;
+            return;
+          }
+          var matches = Array.isArray(res.data) ? res.data : [res.data];
+          var m = matches[0];
+          var label = m.tier === 1
+            ? 'Matched by DOB + Last Name \u2713'
+            : 'Matched by name only \u2014 verify photo ID';
+          dlPending = { idx: m.idx, token: m.token, dobHash: m.dob_hash || '' };
+          openConfirm(m.name, label);
+        });
+    }).catch(function() {
+      showOverlay('err', '❌ Connection error.');
+      qrLocked = false;
+    });
+  };
 }
 
 })();

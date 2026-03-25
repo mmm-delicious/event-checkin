@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.14.0
+ * Version: 3.15.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.14.0');
+define('MMM_ECI_VERSION', '3.15.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -461,6 +461,255 @@ function mmm_checkin_by_phone() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// DRIVER'S LICENSE (AAMVA PDF417) CHECK-IN
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalize a name string for index matching.
+ * Lowercases, strips non-alpha except hyphen/apostrophe/space, collapses whitespace.
+ * Returns '' if the result is fewer than 2 characters.
+ */
+function mmm_normalize_name( $raw ) {
+    $s = strtolower( trim( sanitize_text_field( $raw ) ) );
+    $s = preg_replace( '/[^a-z\-\' ]/', '', $s );
+    $s = preg_replace( '/\s+/', ' ', trim( $s ) );
+    return strlen( $s ) >= 2 ? $s : '';
+}
+
+/**
+ * Normalize a date-of-birth string to YYYY-MM-DD.
+ * Accepts: MMDDYYYY (AAMVA raw 8-digit), MM/DD/YYYY, YYYY-MM-DD.
+ * Returns '' for unparseable or implausible dates.
+ */
+function mmm_normalize_dob( $raw ) {
+    $raw = trim( $raw );
+    $ts  = false;
+
+    if ( preg_match( '/^\d{8}$/', $raw ) ) {
+        // AAMVA raw format: MMDDYYYY
+        $ts = mktime( 0, 0, 0, (int) substr( $raw, 0, 2 ), (int) substr( $raw, 2, 2 ), (int) substr( $raw, 4, 4 ) );
+    } elseif ( preg_match( '/^\d{1,2}\/\d{1,2}\/\d{4}$/', $raw ) ) {
+        $ts = strtotime( $raw );
+    } elseif ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $raw ) ) {
+        $ts = strtotime( $raw );
+    }
+
+    if ( $ts === false || $ts <= 0 ) return '';
+
+    $year = (int) date( 'Y', $ts );
+    $now  = (int) date( 'Y' );
+    if ( $year < 1924 || $year > $now - 15 ) return '';
+
+    return date( 'Y-m-d', $ts );
+}
+
+/**
+ * Build and cache the DL check-in index for one event.
+ *
+ * Index structure (two sub-arrays):
+ *   dob[]  keyed by SHA256(dob_iso) — each key => array of [ 'idx', 'guest', 'ln' ]
+ *   name[] keyed by "norm_first|norm_last" — each key => array of [ 'idx', 'guest' ]
+ */
+function mmm_get_dl_index( $slug ) {
+    $cache_key = 'mmm_dli_' . $slug;
+    $index     = get_transient( $cache_key );
+    if ( $index !== false ) {
+        return $index;
+    }
+
+    $guests = mmm_load_guests( $slug );
+    if ( ! is_array( $guests ) ) {
+        return [ 'dob' => [], 'name' => [] ];
+    }
+
+    $dob_idx  = [];
+    $name_idx = [];
+
+    foreach ( $guests as $idx => $guest ) {
+        $dob_hash = $guest['dob_hash'] ?? '';
+        $fn       = mmm_normalize_name( $guest['first_name'] ?? '' );
+        $ln       = mmm_normalize_name( $guest['last_name']  ?? '' );
+
+        if ( $dob_hash && strlen( $dob_hash ) === 64 ) {
+            $dob_idx[ $dob_hash ][] = [ 'idx' => $idx, 'guest' => $guest, 'ln' => $ln ];
+        }
+        if ( $fn && $ln ) {
+            $name_idx[ $fn . '|' . $ln ][] = [ 'idx' => $idx, 'guest' => $guest ];
+        }
+    }
+
+    $index = [ 'dob' => $dob_idx, 'name' => $name_idx ];
+    set_transient( $cache_key, $index, 12 * HOUR_IN_SECONDS );
+    return $index;
+}
+
+/**
+ * Transient-based rate limiter for the DL endpoint.
+ * Returns true if the request is allowed; false if limit exceeded.
+ * Max 10 attempts per IP per 10 minutes.
+ */
+function mmm_dl_check_rate_limit() {
+    $ip    = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $key   = 'mmm_dlrl_' . md5( $ip );
+    $count = (int) get_transient( $key );
+    if ( $count >= 10 ) {
+        return false;
+    }
+    set_transient( $key, $count + 1, 10 * MINUTE_IN_SECONDS );
+    return true;
+}
+
+// ── Step 1: Search by DL data — returns candidate + HMAC token ───────────────
+
+add_action( 'wp_ajax_mmm_checkin_by_dl',        'mmm_ajax_checkin_by_dl' );
+add_action( 'wp_ajax_nopriv_mmm_checkin_by_dl', 'mmm_ajax_checkin_by_dl' );
+
+function mmm_ajax_checkin_by_dl() {
+    if ( ! mmm_dl_check_rate_limit() ) {
+        wp_send_json_error( '❌ Too many attempts. Please wait a few minutes.' );
+    }
+
+    $event_slug = sanitize_title_with_dashes( $_POST['event']      ?? '' );
+    $dob_hash   = preg_replace( '/[^a-f0-9]/', '', strtolower( $_POST['dob_hash']   ?? '' ) );
+    $last_name  = mmm_normalize_name( $_POST['last_name']  ?? '' );
+    $first_name = mmm_normalize_name( $_POST['first_name'] ?? '' );
+
+    if ( ! $event_slug ) {
+        wp_send_json_error( '❌ Missing event.' );
+    }
+    if ( ! mmm_validate_slug( $event_slug ) || ! mmm_event_exists( $event_slug ) ) {
+        wp_send_json_error( '❌ Event not found.' );
+    }
+    if ( ! $last_name ) {
+        wp_send_json_error( '❌ License unreadable — try phone entry.' );
+    }
+
+    $has_dob = ( $dob_hash && strlen( $dob_hash ) === 64 );
+    $index   = mmm_get_dl_index( $event_slug );
+
+    if ( ! isset( $index['dob'] ) ) {
+        wp_send_json_error( '❌ Guest data unavailable.' );
+    }
+
+    // ── Tier 1: DOB hash + last name ─────────────────────────────────────────
+    if ( $has_dob && ! empty( $index['dob'][ $dob_hash ] ) ) {
+        $candidates = array_values( array_filter( $index['dob'][ $dob_hash ], function ( $e ) use ( $last_name ) {
+            return $e['ln'] === $last_name;
+        } ) );
+
+        if ( ! empty( $candidates ) ) {
+            $window  = floor( time() / 300 );
+            $matches = [];
+            foreach ( $candidates as $entry ) {
+                $idx  = $entry['idx'];
+                $name = trim( ( $entry['guest']['first_name'] ?? '' ) . ' ' . ( $entry['guest']['last_name'] ?? '' ) );
+                $matches[] = [
+                    'idx'      => $idx,
+                    'name'     => $name,
+                    'tier'     => 1,
+                    'dob_hash' => $dob_hash,
+                    'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window, AUTH_KEY ),
+                ];
+            }
+            wp_send_json_success( $matches );
+        }
+    }
+
+    // ── Tier 2: first + last name ─────────────────────────────────────────────
+    if ( ! $first_name ) {
+        wp_send_json_error( '❌ Not found on guest list — try phone entry.' );
+    }
+
+    $name_key   = $first_name . '|' . $last_name;
+    $candidates = $index['name'][ $name_key ] ?? [];
+
+    if ( empty( $candidates ) ) {
+        wp_send_json_error( '❌ Not found on guest list — try phone entry.' );
+    }
+
+    $window  = floor( time() / 300 );
+    $matches = [];
+    foreach ( $candidates as $entry ) {
+        $idx  = $entry['idx'];
+        $name = trim( ( $entry['guest']['first_name'] ?? '' ) . ' ' . ( $entry['guest']['last_name'] ?? '' ) );
+        $matches[] = [
+            'idx'      => $idx,
+            'name'     => $name,
+            'tier'     => 2,
+            'dob_hash' => '',
+            'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . '' . '|' . $window, AUTH_KEY ),
+        ];
+    }
+    wp_send_json_success( $matches );
+}
+
+// ── Step 2: Confirm DL check-in — verifies HMAC + writes checkins file ───────
+
+add_action( 'wp_ajax_mmm_confirm_dl_checkin',        'mmm_ajax_confirm_dl_checkin' );
+add_action( 'wp_ajax_nopriv_mmm_confirm_dl_checkin', 'mmm_ajax_confirm_dl_checkin' );
+
+function mmm_ajax_confirm_dl_checkin() {
+    $event_slug = sanitize_title_with_dashes( $_POST['event']    ?? '' );
+    $idx        = (int) ( $_POST['idx']                          ?? -1 );
+    $dob_hash   = preg_replace( '/[^a-f0-9]/', '', strtolower( $_POST['dob_hash'] ?? '' ) );
+    $token      = sanitize_text_field( $_POST['token']           ?? '' );
+
+    if ( ! $event_slug || $idx < 0 || ! $token ) {
+        wp_send_json_error( '❌ Missing required fields.' );
+    }
+
+    // Accept current and previous 5-min window to avoid boundary failures
+    $window    = floor( time() / 300 );
+    $expected1 = hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window,           AUTH_KEY );
+    $expected2 = hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . ( $window - 1 ),   AUTH_KEY );
+
+    if ( ! hash_equals( $expected1, $token ) && ! hash_equals( $expected2, $token ) ) {
+        wp_send_json_error( '❌ Session expired — scan again.' );
+    }
+
+    if ( ! mmm_validate_slug( $event_slug ) || ! mmm_event_exists( $event_slug ) ) {
+        wp_send_json_error( '❌ Event not found.' );
+    }
+
+    $guests = mmm_load_guests( $event_slug );
+    $guest  = $guests[ $idx ] ?? null;
+    if ( ! $guest ) {
+        wp_send_json_error( '❌ Guest record not found.' );
+    }
+
+    $new_entry = [
+        'guest_idx'       => $idx,
+        'first_name'      => $guest['first_name']      ?? '',
+        'last_name'       => $guest['last_name']        ?? '',
+        'phone'           => $guest['phone']            ?? '',
+        'email'           => $guest['email']            ?? '',
+        'afscme_id'       => $guest['qr_id']            ?? '',
+        'bargaining_unit' => $guest['bargaining_unit']  ?? '',
+        'unit_number'     => $guest['unit_number']      ?? '',
+        'employer'        => $guest['employer']         ?? '',
+        'jurisdiction'    => $guest['jurisdiction']     ?? '',
+        'job_title'       => $guest['job_title']        ?? '',
+        'baseyard'        => $guest['baseyard']         ?? '',
+        'island'          => $guest['island']           ?? '',
+        'member_status'   => $guest['member_status']    ?? '',
+        'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+        'method'          => 'dl',
+    ];
+
+    mmm_locked_checkins_update( $event_slug, function ( $checkins ) use ( $idx, $guest, $new_entry ) {
+        foreach ( $checkins as $ci ) {
+            if ( isset( $ci['guest_idx'] ) && (int) $ci['guest_idx'] === $idx ) {
+                wp_send_json_error( "❌ {$guest['first_name']} is already checked in." );
+            }
+        }
+        $checkins[] = $new_entry;
+        return $checkins;
+    } );
+
+    wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // CSV UPLOAD — Step 1: save temp file, return headers + guesses
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -547,6 +796,7 @@ function mmm_ajax_preview_guest_csv() {
         'first_name'      => [ 'first_name', 'first', 'fname' ],
         'last_name'       => [ 'last_name', 'last', 'lname', 'surname' ],
         'email'           => [ 'email', 'email_address', 'e-mail' ],
+        'dob'             => [ 'dob', 'date_of_birth', 'birth_date', 'birthday', 'birthdate' ],
         'member_status'   => [ 'member_status', 'status', 'membership_status' ],
         'bargaining_unit' => [ 'bargaining_unit', 'bargaining unit', 'unit', 'bu' ],
         'unit_number'     => [ 'unit_number', 'unit_no', 'unit no', 'unit_num' ],
@@ -629,7 +879,7 @@ function mmm_ajax_import_guest_csv() {
     $phone_idx = array_search( strtolower( trim( $phone_col ) ), $norm );
 
     $optional_fields = [
-        'first_name', 'last_name', 'email', 'member_status', 'bargaining_unit',
+        'first_name', 'last_name', 'email', 'dob', 'member_status', 'bargaining_unit',
         'unit_number', 'employer', 'jurisdiction', 'job_title', 'baseyard', 'island',
     ];
     $col_idx = [];
@@ -643,8 +893,9 @@ function mmm_ajax_import_guest_csv() {
         }
     }
 
-    $guests  = [];
-    $skipped = 0;
+    $guests     = [];
+    $skipped    = 0;
+    $dob_errors = 0;
 
     while ( ( $row = fgetcsv( $fh ) ) !== false ) {
         if ( empty( array_filter( $row ) ) ) continue;
@@ -663,6 +914,19 @@ function mmm_ajax_import_guest_csv() {
                 ? sanitize_text_field( $row[ $col_idx[ $field ] ] ?? '' )
                 : '';
         }
+
+        // Convert raw dob string to a SHA256 hash — never store the raw value
+        $raw_dob = $guest['dob'] ?? '';
+        unset( $guest['dob'] );
+        if ( $raw_dob !== '' ) {
+            $normalized_dob = mmm_normalize_dob( $raw_dob );
+            if ( $normalized_dob ) {
+                $guest['dob_hash'] = hash( 'sha256', $normalized_dob );
+            } else {
+                $dob_errors++;
+            }
+        }
+
         $guests[] = $guest;
     }
 
@@ -681,13 +945,17 @@ function mmm_ajax_import_guest_csv() {
         mmm_save_meta( $slug, $meta );
     }
 
-    // Bust phone and QR index caches
-    delete_transient( 'mmm_pi_' . $slug );
-    delete_transient( 'mmm_qi_' . $slug );
+    // Bust phone, QR, and DL index caches
+    delete_transient( 'mmm_pi_'  . $slug );
+    delete_transient( 'mmm_qi_'  . $slug );
+    delete_transient( 'mmm_dli_' . $slug );
 
     $msg = count( $guests ) . ' guests imported';
     if ( $skipped ) {
         $msg .= ' (' . $skipped . ' skipped — missing both QR ID and phone)';
+    }
+    if ( $dob_errors ) {
+        $msg .= '. ⚠ ' . $dob_errors . ' guests have an invalid or missing date of birth — they will check in by name only';
     }
     wp_send_json_success( $msg . '.' );
 }
