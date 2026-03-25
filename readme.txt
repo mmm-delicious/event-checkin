@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 3.15.3
+Stable tag: 3.15.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,12 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.15.4 =
+* Improvement: Camera resolution bumped to 1080p for better PDF417 decode on dense DL barcodes
+* Improvement: Continuous autofocus applied after stream starts (camera keeps retrying focus)
+* Improvement: Torch/flashlight button appears on supported Android devices (Chrome)
+* Fix: Camera selector switch now carries resolution constraints instead of bare deviceId
 
 = 3.15.3 =
 * Fix: DOB importer now accepts M/D/YY format (e.g. 9/5/75 → 1975-09-05)

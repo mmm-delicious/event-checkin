@@ -209,6 +209,10 @@ $site_icon   = get_site_icon_url(128);
     #scanner-controls {
       flex-shrink: 0;
       font-size: 0.9rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
     }
     #camera-selector {
       padding: 6px 10px;
@@ -216,6 +220,24 @@ $site_icon   = get_site_icon_url(128);
       border: 1px solid #cbd5e1;
       background: #fff;
       touch-action: manipulation;
+    }
+    #torch-btn {
+      display: none;
+      padding: 8px 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: 2px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      color: #334155;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #torch-btn.on {
+      background: #fef9c3;
+      border-color: #eab308;
+      color: #713f12;
     }
 
     #qr-scanner {
@@ -447,8 +469,11 @@ $site_icon   = get_site_icon_url(128);
   <div id="screen-qr">
     <button id="start-camera-btn">&#x1F4F7; Start Camera</button>
     <div id="scanner-controls" style="display:none">
-      <label for="camera-selector">Camera: </label>
-      <select id="camera-selector"></select>
+      <div>
+        <label for="camera-selector">Camera: </label>
+        <select id="camera-selector"></select>
+      </div>
+      <button id="torch-btn">&#x1F526; Torch</button>
     </div>
     <div id="qr-scanner">
       <video id="qr-video" playsinline autoplay muted></video>
@@ -607,6 +632,7 @@ function handleResponse(res, onDone) {
 var startBtn     = document.getElementById('start-camera-btn');
 var camControls  = document.getElementById('scanner-controls');
 var camSelect    = document.getElementById('camera-selector');
+var torchBtn     = document.getElementById('torch-btn');
 var video        = document.getElementById('qr-video');
 var detector     = null;
 var qrLocked     = false;
@@ -615,6 +641,7 @@ var qrStream     = null;
 var qrRafId      = null;
 var qrDeviceId   = null;
 var scanInFlight = false;
+var torchOn      = false;
 
 var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417'];
 
@@ -655,12 +682,28 @@ function scanLoop() {
   qrRafId = requestAnimationFrame(scanLoop);
 }
 
+function applyTrackEnhancements(track) {
+  // Continuous autofocus — keeps focus sharp as DL moves in/out of frame
+  track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+
+  // Torch: show button only if the device supports it
+  var caps = (typeof track.getCapabilities === 'function') ? track.getCapabilities() : {};
+  if (caps.torch) {
+    torchBtn.style.display = 'block';
+  } else {
+    torchBtn.style.display = 'none';
+    torchOn = false;
+    torchBtn.classList.remove('on');
+  }
+}
+
 function startQr(deviceId) {
   if (qrRunning) return;
-  // 720p is sufficient for QR and 1D barcodes — 1080p is unnecessary overhead
+  // 1080p gives the decoder more pixels for dense PDF417 barcodes on driver's licences
+  var res = { width: { ideal: 1920 }, height: { ideal: 1080 } };
   var constraint = deviceId
-    ? { video: { deviceId: { exact: deviceId } } }
-    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+    ? { video: Object.assign({ deviceId: { exact: deviceId } }, res) }
+    : { video: Object.assign({ facingMode: { ideal: 'environment' } }, res) };
   ensureDetector()
     .then(function () { return navigator.mediaDevices.getUserMedia(constraint); })
     .then(function (stream) {
@@ -673,6 +716,7 @@ function startQr(deviceId) {
       startBtn.textContent = '\uD83D\uDCF7 Stop Camera';
       var track = stream.getVideoTracks()[0];
       video.style.transform = (track.label || '').toLowerCase().includes('front') ? 'scaleX(-1)' : '';
+      applyTrackEnhancements(track);
       // Build camera selector after permission is granted (labels are now populated)
       if (!qrDeviceId) {
         qrDeviceId = track.getSettings().deviceId || 'default';
@@ -712,6 +756,22 @@ function startQr(deviceId) {
     });
 }
 
+torchBtn.addEventListener('click', function () {
+  if (!qrStream) return;
+  var track = qrStream.getVideoTracks()[0];
+  if (!track) return;
+  torchOn = !torchOn;
+  track.applyConstraints({ advanced: [{ torch: torchOn }] })
+    .then(function () {
+      torchBtn.classList.toggle('on', torchOn);
+      torchBtn.textContent = torchOn ? '\uD83D\uDD26 Torch On' : '\uD83D\uDD26 Torch';
+    })
+    .catch(function () {
+      torchOn = false;
+      torchBtn.classList.remove('on');
+    });
+});
+
 function stopQr() {
   if (!qrRunning) return;
   if (qrRafId)  { cancelAnimationFrame(qrRafId); qrRafId = null; }
@@ -719,6 +779,10 @@ function stopQr() {
   video.srcObject = null;
   qrRunning = false;
   startBtn.textContent = '\uD83D\uDCF7 Start Camera';
+  torchOn = false;
+  torchBtn.classList.remove('on');
+  torchBtn.textContent = '\uD83D\uDD26 Torch';
+  torchBtn.style.display = 'none';
 }
 
 // ── AAMVA PDF417 helpers ──────────────────────────────────────────────────────
