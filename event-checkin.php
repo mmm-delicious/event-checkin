@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.15.0
+ * Version: 3.15.1
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.15.0');
+define('MMM_ECI_VERSION', '3.15.1');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -799,7 +799,7 @@ function mmm_ajax_preview_guest_csv() {
         'dob'             => [ 'dob', 'date_of_birth', 'birth_date', 'birthday', 'birthdate' ],
         'member_status'   => [ 'member_status', 'status', 'membership_status' ],
         'bargaining_unit' => [ 'bargaining_unit', 'bargaining unit', 'unit', 'bu' ],
-        'unit_number'     => [ 'unit_number', 'unit_no', 'unit no', 'unit_num' ],
+        'unit_number'     => [ 'unit_name', 'unit name', 'unit_number', 'unit_no', 'unit no', 'unit_num' ],
         'employer'        => [ 'employer', 'agency', 'department' ],
         'jurisdiction'    => [ 'jurisdiction', 'juris' ],
         'job_title'       => [ 'job_title', 'title', 'position', 'job title' ],
