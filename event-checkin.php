@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.15.1
+ * Version: 3.15.2
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.15.1');
+define('MMM_ECI_VERSION', '3.15.2');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -903,7 +903,11 @@ function mmm_ajax_import_guest_csv() {
         $qr_val    = ( $qr_idx    !== false && isset( $row[ $qr_idx ] ) )    ? trim( $row[ $qr_idx ] )    : '';
         $phone_val = ( $phone_idx !== false && isset( $row[ $phone_idx ] ) ) ? trim( $row[ $phone_idx ] ) : '';
 
-        if ( $qr_val === '' && $phone_val === '' ) {
+        // Also peek at name columns — a name alone is enough for DL check-in
+        $fn_val = isset( $col_idx['first_name'] ) ? trim( $row[ $col_idx['first_name'] ] ?? '' ) : '';
+        $ln_val = isset( $col_idx['last_name'] )  ? trim( $row[ $col_idx['last_name'] ]  ?? '' ) : '';
+
+        if ( $qr_val === '' && $phone_val === '' && $fn_val === '' && $ln_val === '' ) {
             $skipped++;
             continue;
         }
@@ -952,7 +956,7 @@ function mmm_ajax_import_guest_csv() {
 
     $msg = count( $guests ) . ' guests imported';
     if ( $skipped ) {
-        $msg .= ' (' . $skipped . ' skipped — missing both QR ID and phone)';
+        $msg .= ' (' . $skipped . ' skipped — no QR ID, phone, or name)';
     }
     if ( $dob_errors ) {
         $msg .= '. ⚠ ' . $dob_errors . ' guests have an invalid or missing date of birth — they will check in by name only';
