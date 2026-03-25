@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 3.7.0
+Stable tag: 3.15.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,25 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.15.0 =
+* New: AAMVA PDF417 driver's licence check-in — scan a US/Canada DL to check in a guest
+* Tiered matching: Tier 1 uses DOB + last name (for members with DOB in CSV); Tier 2 falls
+  back to first + last name with staff confirmation overlay
+* DOB is never transmitted or stored in plaintext — SHA-256 hash only
+* pdf417 added to BarcodeDetector WANT_FORMATS (ZXing-WASM polyfill already supports it)
+* AAMVA JS parser handles DCS/DCT/DAC/DBB fields; client-side validation before any AJAX
+* Confirmation overlay shows match tier ("Matched by DOB + Last Name" or "Matched by name only")
+* Rate limiting: 10 DL search attempts per IP per 10 minutes via transients
+* HMAC tokens include method prefix (dl|) and 5-minute time window
+* CSV import: optional dob column accepted; raw DOB hashed at import, never stored raw
+* Admin import feedback: reports count of guests with invalid DOB (name-only fallback)
+* HSTS header added to public scanner page response
+
+= 3.14.0 =
+* Scanner: replaced jsQR with ZXing-C++ WASM polyfill (BarcodeDetector API)
+* Full 1D barcode + QR support on Safari/iOS via self-hosted .wasm bundle (no CDN)
+* WASM file served locally — eliminates CDN dependency for polyfill
 
 = 3.7.0 =
 * Performance & Scalability: three-file split architecture ({slug}-meta.json,
