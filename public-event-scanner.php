@@ -642,6 +642,8 @@ var qrRafId      = null;
 var qrDeviceId   = null;
 var scanInFlight = false;
 var torchOn      = false;
+var lastScanAt   = 0;
+var SCAN_INTERVAL = 200; // ms between decode attempts
 
 var WANT_FORMATS = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417'];
 
@@ -672,7 +674,9 @@ function ensureDetector() {
 
 function scanLoop() {
   if (!qrRunning) return;
-  if (!scanInFlight && !qrLocked && video.readyState >= 2) {
+  var now = Date.now();
+  if (!scanInFlight && !qrLocked && video.readyState >= 2 && (now - lastScanAt) >= SCAN_INTERVAL) {
+    lastScanAt   = now;
     scanInFlight = true;
     detector.detect(video)
       .then(function (codes) { if (codes.length && !qrLocked) handleScan(codes[0].rawValue); })

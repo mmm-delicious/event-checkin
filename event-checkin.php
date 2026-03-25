@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.15.5
+ * Version: 3.15.6
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
