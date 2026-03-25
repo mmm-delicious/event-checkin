@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 3.15.2
+Stable tag: 3.15.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,10 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.15.3 =
+* Fix: DOB importer now accepts M/D/YY format (e.g. 9/5/75 → 1975-09-05)
+* 2-digit years 70–99 map to 1970–1999; 00–69 map to 2000–2069
 
 = 3.15.2 =
 * Fix: Guests with name + DOB but no QR ID or phone are now imported (previously skipped)

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.15.2
+ * Version: 3.15.3
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.15.2');
+define('MMM_ECI_VERSION', '3.15.3');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -478,19 +478,29 @@ function mmm_normalize_name( $raw ) {
 
 /**
  * Normalize a date-of-birth string to YYYY-MM-DD.
- * Accepts: MMDDYYYY (AAMVA raw 8-digit), MM/DD/YYYY, YYYY-MM-DD.
+ * Accepts: MMDDYYYY (AAMVA raw 8-digit), M/D/YY, MM/DD/YYYY, YYYY-MM-DD.
+ * 2-digit years: 70–99 → 1970–1999, 00–69 → 2000–2069 (PHP default).
  * Returns '' for unparseable or implausible dates.
  */
 function mmm_normalize_dob( $raw ) {
     $raw = trim( $raw );
-    $ts  = false;
+    if ( $raw === '' ) return '';
+
+    $ts = false;
 
     if ( preg_match( '/^\d{8}$/', $raw ) ) {
-        // AAMVA raw format: MMDDYYYY
+        // AAMVA raw: MMDDYYYY
         $ts = mktime( 0, 0, 0, (int) substr( $raw, 0, 2 ), (int) substr( $raw, 2, 2 ), (int) substr( $raw, 4, 4 ) );
+    } elseif ( preg_match( '/^\d{1,2}\/\d{1,2}\/\d{2}$/', $raw ) ) {
+        // M/D/YY — common export format (e.g. 9/5/75)
+        $dt = DateTime::createFromFormat( 'n/j/y', $raw );
+        if ( $dt ) $ts = $dt->getTimestamp();
     } elseif ( preg_match( '/^\d{1,2}\/\d{1,2}\/\d{4}$/', $raw ) ) {
-        $ts = strtotime( $raw );
+        // M/D/YYYY or MM/DD/YYYY
+        $dt = DateTime::createFromFormat( 'n/j/Y', $raw );
+        if ( $dt ) $ts = $dt->getTimestamp();
     } elseif ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $raw ) ) {
+        // ISO 8601: YYYY-MM-DD
         $ts = strtotime( $raw );
     }
 
