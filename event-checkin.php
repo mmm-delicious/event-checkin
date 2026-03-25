@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.15.4
+ * Version: 3.15.5
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.15.4');
+define('MMM_ECI_VERSION', '3.15.5');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -1111,8 +1111,10 @@ function mmm_ajax_edit_guest() {
         wp_send_json_error( 'Could not save changes.' );
     }
 
-    // Bust phone index if phone changed
-    delete_transient( 'mmm_pi_' . $slug );
+    // Bust all scan indexes — qr_id or phone may have changed
+    delete_transient( 'mmm_pi_'  . $slug );
+    delete_transient( 'mmm_qi_'  . $slug );
+    delete_transient( 'mmm_dli_' . $slug );
 
     wp_send_json_success( 'Guest updated.' );
 }
@@ -1189,7 +1191,9 @@ function mmm_ajax_add_guest() {
         mmm_save_meta( $slug, $meta );
     }
 
-    delete_transient( 'mmm_pi_' . $slug );
+    delete_transient( 'mmm_pi_'  . $slug );
+    delete_transient( 'mmm_qi_'  . $slug );
+    delete_transient( 'mmm_dli_' . $slug );
     wp_send_json_success( [ 'guest_idx' => $new_idx ] );
 }
 
