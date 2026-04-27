@@ -227,8 +227,14 @@ function mmm_render_checkin_view_page() {
             var col    = sortCol;
             var dir    = sortDir;
             var sorted = checkins.slice().sort(function (a, b) {
-                var va = ((a[col] || '') + '').toLowerCase();
-                var vb = ((b[col] || '') + '').toLowerCase();
+                var va, vb;
+                if (col === 'time') {
+                    va = a.timestamp || 0;
+                    vb = b.timestamp || 0;
+                    return dir === 'asc' ? va - vb : vb - va;
+                }
+                va = ((a[col] || '') + '').toLowerCase();
+                vb = ((b[col] || '') + '').toLowerCase();
                 if (va < vb) return dir === 'asc' ? -1 :  1;
                 if (va > vb) return dir === 'asc' ?  1 : -1;
                 return 0;
@@ -340,6 +346,7 @@ function mmm_ajax_get_checkin_table() {
             'bargaining_unit' => $ci['bargaining_unit'] ?? '',
             'member_status'   => $ci['member_status']   ?? '',
             'time'            => $ci['time']            ?? '',
+            'timestamp'       => strtotime( $ci['time'] ?? '' ) ?: 0,
         ];
     }
     wp_send_json_success( $rows );
