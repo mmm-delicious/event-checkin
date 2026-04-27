@@ -182,6 +182,7 @@ function mmm_render_guest_list_page() {
                         'last_name'       => $guest['last_name']       ?? '',
                         'qr_id'           => $guest['qr_id']           ?? '',
                         'phone'           => $guest['phone']           ?? '',
+                        'email'           => $guest['email']           ?? '',
                         'member_status'   => $guest['member_status']   ?? '',
                         'bargaining_unit' => $guest['bargaining_unit'] ?? '',
                         'is_checked_in'   => $is_checked ? '1' : '0',
@@ -204,6 +205,15 @@ function mmm_render_guest_list_page() {
                         <button class="button button-small mmm-manual-checkin">Check In</button>
                         <?php else: ?>
                         <button class="button button-small mmm-undo-checkin" style="color:#dc3545; border-color:#dc3545;">Remove</button>
+                        <?php endif; ?>
+                        <?php
+                        $missing_contact = [];
+                        if ( empty( $guest['phone'] ) ) $missing_contact[] = 'phone';
+                        if ( empty( $guest['email'] ) ) $missing_contact[] = 'email';
+                        if ( $missing_contact ):
+                            $contact_label = count( $missing_contact ) === 2 ? 'phone &amp; email' : $missing_contact[0];
+                        ?>
+                        <span class="mmm-contact-missing" style="display:block; margin-top:3px;"><a href="#" class="mmm-add-contact" style="font-size:0.78em; color:#b45309; text-decoration:none;">&#9888; Add <?= $contact_label; ?></a></span>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -248,6 +258,29 @@ function mmm_render_guest_list_page() {
                 <div style="margin-top:16px; display:flex; gap:8px;">
                     <button id="edit-save-btn" class="button button-primary">Save</button>
                     <button id="edit-cancel-btn" class="button">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Contact Modal -->
+        <div id="mmm-contact-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+            <div style="background:#fff; border-radius:8px; padding:24px; width:360px; max-width:95vw; box-shadow:0 4px 24px rgba(0,0,0,0.25);">
+                <h2 style="margin:0 0 4px;">Add Contact Info</h2>
+                <p id="contact-modal-name" style="margin:0 0 16px; color:#555; font-size:0.9em;"></p>
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr id="contact-phone-row">
+                        <td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Phone</td>
+                        <td><input type="tel" id="contact-phone" style="width:100%;" placeholder="e.g. 808-555-1234" /></td>
+                    </tr>
+                    <tr id="contact-email-row">
+                        <td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Email</td>
+                        <td><input type="email" id="contact-email" style="width:100%;" /></td>
+                    </tr>
+                </table>
+                <p id="contact-modal-status" style="margin:10px 0 0; color:#dc3545; font-size:0.9em;"></p>
+                <div style="margin-top:16px; display:flex; gap:8px;">
+                    <button id="contact-save-btn" class="button button-primary">Save</button>
+                    <button id="contact-cancel-btn" class="button">Cancel</button>
                 </div>
             </div>
         </div>
@@ -456,12 +489,14 @@ function mmm_render_guest_list_page() {
             if (document.hidden) { stopPolling(); } else { pollCheckins(); startPolling(); }
         });
 
-        // ── Search auto-submit (debounced 400ms) ──────────────────────────────
+        // ── Search auto-submit (debounced 400ms, min 3 chars) ────────────────
         var searchTimeout;
         var searchInput = document.getElementById('mmm-search');
         if (searchInput) {
             searchInput.addEventListener('input', function () {
                 clearTimeout(searchTimeout);
+                var val = searchInput.value;
+                if (val.length > 0 && val.length < 3) return;
                 searchTimeout = setTimeout(function () {
                     searchInput.closest('form').submit();
                 }, 400);
@@ -653,6 +688,87 @@ function mmm_render_guest_list_page() {
                     }
                 })
                 .catch(function () { saveBtn.disabled = false; saveBtn.textContent = 'Add Guest'; document.getElementById('add-modal-status').textContent = 'Connection error.'; });
+        });
+
+        // ── Add Contact Modal ─────────────────────────────────────────────────
+        var contactModal = document.getElementById('mmm-contact-modal');
+        var contactIdx   = null;
+
+        function wireAddContactLink(link) {
+            link.addEventListener('click', function (e) {
+                e.preventDefault();
+                var row    = link.closest('tr');
+                contactIdx = row.dataset.idx;
+                var g      = JSON.parse(row.dataset.guest);
+                document.getElementById('contact-modal-name').textContent = (g.first_name + ' ' + g.last_name).trim();
+                var phoneRow = document.getElementById('contact-phone-row');
+                var emailRow = document.getElementById('contact-email-row');
+                phoneRow.style.display = g.phone ? 'none' : '';
+                emailRow.style.display = g.email ? 'none' : '';
+                document.getElementById('contact-phone').value = '';
+                document.getElementById('contact-email').value = '';
+                document.getElementById('contact-modal-status').textContent = '';
+                contactModal.style.display = 'flex';
+            });
+        }
+        document.querySelectorAll('.mmm-add-contact').forEach(wireAddContactLink);
+
+        document.getElementById('contact-cancel-btn').addEventListener('click', function () {
+            contactModal.style.display = 'none';
+        });
+        contactModal.addEventListener('click', function (e) {
+            if (e.target === contactModal) contactModal.style.display = 'none';
+        });
+
+        document.getElementById('contact-save-btn').addEventListener('click', function () {
+            var saveBtn = this;
+            saveBtn.disabled    = true;
+            saveBtn.textContent = 'Saving…';
+            document.getElementById('contact-modal-status').textContent = '';
+
+            var row      = document.getElementById('guest-row-' + contactIdx);
+            var g        = JSON.parse(row.dataset.guest);
+            var newPhone = document.getElementById('contact-phone').value.trim() || g.phone;
+            var newEmail = document.getElementById('contact-email').value.trim() || g.email;
+
+            var fd = new FormData();
+            fd.append('action',          'mmm_edit_guest');
+            fd.append('mmm_edit_nonce',  MMM_EDIT_NONCE);
+            fd.append('event',           MMM_EVENT_SLUG);
+            fd.append('guest_idx',       contactIdx);
+            fd.append('first_name',      g.first_name);
+            fd.append('last_name',       g.last_name);
+            fd.append('qr_id',           g.qr_id);
+            fd.append('phone',           newPhone);
+            fd.append('email',           newEmail);
+            fd.append('member_status',   g.member_status);
+            fd.append('bargaining_unit', g.bargaining_unit);
+            fd.append('is_checked_in',   g.is_checked_in);
+
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    saveBtn.disabled    = false;
+                    saveBtn.textContent = 'Save';
+                    if (res.success) {
+                        contactModal.style.display = 'none';
+                        g.phone = newPhone;
+                        g.email = newEmail;
+                        row.dataset.guest = JSON.stringify(g);
+                        if (newPhone) row.cells[2].textContent = newPhone;
+                        if (newPhone && newEmail) {
+                            var missing = actionEl(contactIdx).querySelector('.mmm-contact-missing');
+                            if (missing) missing.remove();
+                        }
+                    } else {
+                        document.getElementById('contact-modal-status').textContent = res.data || 'Error saving.';
+                    }
+                })
+                .catch(function () {
+                    saveBtn.disabled    = false;
+                    saveBtn.textContent = 'Save';
+                    document.getElementById('contact-modal-status').textContent = 'Connection error.';
+                });
         });
         </script>
 
