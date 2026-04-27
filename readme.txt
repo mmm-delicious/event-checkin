@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 3.16.4
+Stable tag: 3.16.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,9 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.16.5 =
+* Fix: Check-In Time sort now works correctly — stores Unix timestamp at check-in time instead of parsing the display string (which PHP strtotime cannot parse)
 
 = 3.16.4 =
 * Fix: Check-In Monitor "Check-In Time" column now sorts chronologically (9:00 AM before 12:30 PM) instead of lexicographically

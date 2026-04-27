@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.4
+ * Version: 3.16.5
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.4');
+define('MMM_ECI_VERSION', '3.16.5');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -234,6 +234,7 @@ function mmm_handle_checkin() {
             'baseyard'        => $all_meta['baseyard'][0]        ?? '',
             'island'          => $all_meta['island'][0]          ?? '',
             'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
             'method'          => 'qr',
         ];
         mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $user, $new_entry ) {
@@ -285,6 +286,7 @@ function mmm_handle_checkin() {
             'baseyard'        => $guest['baseyard']        ?? '',
             'island'          => $guest['island']          ?? '',
             'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
             'method'          => 'qr',
         ];
         return $checkins;
@@ -446,6 +448,7 @@ function mmm_checkin_by_phone() {
         'island'          => $guest['island']           ?? '',
         'member_status'   => $guest['member_status']    ?? '',
         'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
         'method'          => 'phone',
     ];
 
@@ -713,6 +716,7 @@ function mmm_ajax_confirm_dl_checkin() {
         'island'          => $guest['island']           ?? '',
         'member_status'   => $guest['member_status']    ?? '',
         'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
         'method'          => 'dl',
     ];
 
@@ -1105,6 +1109,7 @@ function mmm_ajax_edit_guest() {
             'baseyard'        => $g['baseyard']         ?? '',
             'island'          => $g['island']           ?? '',
             'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
             'method'          => 'manual',
         ];
     } elseif ( ! $now_checked && $was_checked ) {
@@ -1190,6 +1195,7 @@ function mmm_ajax_add_guest() {
             'baseyard'        => $guest['baseyard'],
             'island'          => $guest['island'],
             'time'            => date_i18n( 'g:ia, l, F j, Y' ),
+            'ts'              => time(),
             'method'          => 'manual',
         ];
         mmm_save_checkins( $slug, $checkins );

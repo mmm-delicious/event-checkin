@@ -346,7 +346,7 @@ function mmm_ajax_get_checkin_table() {
             'bargaining_unit' => $ci['bargaining_unit'] ?? '',
             'member_status'   => $ci['member_status']   ?? '',
             'time'            => $ci['time']            ?? '',
-            'timestamp'       => strtotime( $ci['time'] ?? '' ) ?: 0,
+            'timestamp'       => $ci['ts'] ?? 0,
         ];
     }
     wp_send_json_success( $rows );
