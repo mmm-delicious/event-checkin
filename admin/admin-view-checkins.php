@@ -131,6 +131,8 @@ function mmm_render_checkin_view_page() {
             document.getElementById('chart-breakdown-field').addEventListener('change', function () {
                 updateBarChartFromBreakdown(window._lastBreakdown || {});
             });
+
+            renderArrows();
         });
 
         // Pause polling when tab is hidden, resume on show
