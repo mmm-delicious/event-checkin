@@ -2,9 +2,9 @@
 Contributors: mmmdelicious
 Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
-Tested up to: 6.7
+Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 3.15.6
+Stable tag: 3.16.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,22 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.16.3 =
+* Compatibility: Tested up to WordPress 6.9
+
+= 3.16.2 =
+* New: Missing contact prompt on iPad scanner confirm overlay — when a checked-in guest has no email or phone, an inline panel appears before the Check-In button to capture it
+* New: Public AJAX endpoint (mmm_update_guest_contact) with HMAC token auth so scanner volunteers can save contact info without admin access
+* Fix: Phone and DL search responses now include a `missing` array so callers know which fields need collecting
+
+= 3.16.1 =
+* New: Admin guest list — amber "Add phone/email" link appears on rows with missing contact info, opens a modal to fill it in
+* Fix: Search bar now waits for 3+ characters before firing AJAX — prevents a request on every keystroke
+
+= 3.16.0 =
+* Fix: CSV column auto-mapper now recognises "First Name" / "Last Name" (with spaces), "Islands", and "UPW Member" headers
+* Improvement: Guest list now shows 250 rows per page (was 100)
 
 = 3.15.6 =
 * Fix: Scanner throttled to 200ms between decode attempts — prevents CPU saturation
