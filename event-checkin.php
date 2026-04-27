@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.1
+ * Version: 3.16.2
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.1');
+define('MMM_ECI_VERSION', '3.16.2');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -315,8 +315,9 @@ function mmm_get_phone_index( $slug ) {
         $phone = mmm_normalize_phone( $guest['phone'] ?? '' );
         if ( ! $phone ) continue;
         $index[ $phone ][] = [
-            'idx'  => $idx,
-            'name' => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+            'idx'       => $idx,
+            'name'      => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+            'has_email' => ! empty( $guest['email'] ),
         ];
     }
 
@@ -382,6 +383,7 @@ function mmm_search_by_phone() {
             'name'       => $entry['name'],
             'token'      => $token,
             'full_phone' => $phone,
+            'missing'    => ( $entry['has_email'] ?? true ) ? [] : [ 'email' ],
         ];
     }
 
@@ -619,6 +621,10 @@ function mmm_ajax_checkin_by_dl() {
                     'tier'     => 1,
                     'dob_hash' => $dob_hash,
                     'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window, AUTH_KEY ),
+                    'missing'  => array_values( array_filter( [
+                        empty( $entry['guest']['phone'] ) ? 'phone' : null,
+                        empty( $entry['guest']['email'] ) ? 'email' : null,
+                    ] ) ),
                 ];
             }
             wp_send_json_success( $matches );
@@ -648,6 +654,10 @@ function mmm_ajax_checkin_by_dl() {
             'tier'     => 2,
             'dob_hash' => '',
             'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . '' . '|' . $window, AUTH_KEY ),
+            'missing'  => array_values( array_filter( [
+                empty( $entry['guest']['phone'] ) ? 'phone' : null,
+                empty( $entry['guest']['email'] ) ? 'email' : null,
+            ] ) ),
         ];
     }
     wp_send_json_success( $matches );
@@ -1196,6 +1206,69 @@ function mmm_ajax_add_guest() {
     delete_transient( 'mmm_qi_'  . $slug );
     delete_transient( 'mmm_dli_' . $slug );
     wp_send_json_success( [ 'guest_idx' => $new_idx ] );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// UPDATE CONTACT — public endpoint; authorized by the phone/DL check-in token
+// Only allows writing phone + email; no other fields.
+// ────────────────────────────────────────────────────────────────────────────
+
+add_action( 'wp_ajax_mmm_update_guest_contact',        'mmm_ajax_update_guest_contact' );
+add_action( 'wp_ajax_nopriv_mmm_update_guest_contact', 'mmm_ajax_update_guest_contact' );
+
+function mmm_ajax_update_guest_contact() {
+    $event_slug = sanitize_title_with_dashes( $_POST['event']      ?? '' );
+    $idx        = (int) ( $_POST['idx']                            ?? -1 );
+    $token      = sanitize_text_field( $_POST['token']             ?? '' );
+    $token_type = sanitize_text_field( $_POST['token_type']        ?? 'phone' );
+    $auth_phone = mmm_normalize_phone( $_POST['phone']             ?? '' );
+    $dob_hash   = preg_replace( '/[^a-f0-9]/', '', strtolower( $_POST['dob_hash'] ?? '' ) );
+
+    if ( ! $event_slug || $idx < 0 || ! $token ) {
+        wp_send_json_error( 'Missing required fields.' );
+    }
+    if ( ! mmm_validate_slug( $event_slug ) || ! mmm_event_exists( $event_slug ) ) {
+        wp_send_json_error( 'Event not found.' );
+    }
+
+    // Verify token matches the phone or DL lookup that produced it
+    $valid = false;
+    if ( $token_type === 'phone' && $auth_phone ) {
+        $expected = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $auth_phone, AUTH_KEY );
+        $valid    = hash_equals( $expected, $token );
+    } else {
+        $window = floor( time() / 300 );
+        $e1     = hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window,           AUTH_KEY );
+        $e2     = hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . ( $window - 1 ),   AUTH_KEY );
+        $valid  = hash_equals( $e1, $token ) || hash_equals( $e2, $token );
+    }
+    if ( ! $valid ) {
+        wp_send_json_error( 'Invalid token.' );
+    }
+
+    $guests = mmm_load_guests( $event_slug );
+    if ( ! isset( $guests[ $idx ] ) ) {
+        wp_send_json_error( 'Guest not found.' );
+    }
+
+    $new_phone = sanitize_text_field( $_POST['new_phone'] ?? '' );
+    $new_email = sanitize_email(      $_POST['new_email'] ?? '' );
+
+    if ( ! $new_phone && ! $new_email ) {
+        wp_send_json_error( 'Nothing to update.' );
+    }
+
+    if ( $new_phone ) $guests[ $idx ]['phone'] = $new_phone;
+    if ( $new_email ) $guests[ $idx ]['email'] = $new_email;
+
+    if ( mmm_save_guests( $event_slug, $guests ) === false ) {
+        wp_send_json_error( 'Could not save.' );
+    }
+
+    if ( $new_phone ) delete_transient( 'mmm_pi_'  . $event_slug );
+    delete_transient( 'mmm_dli_' . $event_slug );
+
+    wp_send_json_success( 'Contact updated.' );
 }
 
 // ────────────────────────────────────────────────────────────────────────────

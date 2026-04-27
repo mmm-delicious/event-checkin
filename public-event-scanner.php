@@ -515,6 +515,15 @@ $site_icon   = get_site_icon_url(128);
   <h2>Confirm Check-In</h2>
   <div id="confirm-name"></div>
   <div id="confirm-method"></div>
+  <div id="confirm-contact-missing" style="display:none; margin:10px 0 14px; padding:10px 12px; background:#fff7ed; border-radius:10px; border:1px solid #fed7aa; text-align:left;">
+    <div id="confirm-contact-label" style="font-size:0.8rem; color:#92400e; font-weight:600; margin-bottom:8px;"></div>
+    <div id="confirm-contact-fields"></div>
+    <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+      <button id="confirm-contact-save" style="flex:1; height:38px; font-size:0.9rem; font-weight:700; background:#0073aa; color:#fff; border:none; border-radius:8px; cursor:pointer; touch-action:manipulation;">Save</button>
+      <button id="confirm-contact-skip" style="height:38px; font-size:0.85rem; color:#92400e; background:none; border:none; cursor:pointer; touch-action:manipulation; text-decoration:underline;">Skip</button>
+    </div>
+    <div id="confirm-contact-status" style="font-size:0.78rem; color:#dc2626; margin-top:4px; min-height:1em;"></div>
+  </div>
   <div class="confirm-btns">
     <button id="confirm-no">Cancel</button>
     <button id="confirm-yes">Check In</button>
@@ -933,12 +942,92 @@ if (HAS_GUESTS) {
     dlPending = null;
   }
 
-  function openConfirm(name, label) {
+  function openConfirm(name, label, missing) {
     confirmNm.textContent    = name;
     confirmMthd.textContent  = label || '';
-    backdrop.style.display   = 'block';
-    confirmOv.style.display  = 'block';
+
+    var contactSection = document.getElementById('confirm-contact-missing');
+    var contactLabel   = document.getElementById('confirm-contact-label');
+    var contactFields  = document.getElementById('confirm-contact-fields');
+    var contactStatus  = document.getElementById('confirm-contact-status');
+    contactStatus.textContent = '';
+
+    if (missing && missing.length) {
+      var missingLabel = missing.length === 2 ? 'phone & email' : missing[0];
+      contactLabel.textContent = '⚠️ No ' + missingLabel + ' on file — add it now?';
+      contactFields.innerHTML  = '';
+      missing.forEach(function(f) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px; margin:4px 0;';
+        var lbl = document.createElement('span');
+        lbl.style.cssText = 'min-width:48px; font-size:0.82rem; font-weight:700; color:#78350f; text-transform:capitalize;';
+        lbl.textContent   = f + ':';
+        var inp = document.createElement('input');
+        inp.type        = f === 'email' ? 'email' : 'tel';
+        inp.id          = 'confirm-contact-' + f;
+        inp.placeholder = f === 'email' ? 'email@example.com' : '808-555-1234';
+        inp.style.cssText = 'flex:1; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; font-size:0.9rem;';
+        row.appendChild(lbl);
+        row.appendChild(inp);
+        contactFields.appendChild(row);
+      });
+      contactSection.style.display = 'block';
+    } else {
+      contactSection.style.display = 'none';
+    }
+
+    backdrop.style.display  = 'block';
+    confirmOv.style.display = 'block';
   }
+
+  document.getElementById('confirm-contact-skip').addEventListener('click', function() {
+    document.getElementById('confirm-contact-missing').style.display = 'none';
+  });
+
+  document.getElementById('confirm-contact-save').addEventListener('click', function() {
+    var saveBtn    = this;
+    var statusEl   = document.getElementById('confirm-contact-status');
+    var newPhone   = (document.getElementById('confirm-contact-phone') || {value:''}).value.trim();
+    var newEmail   = (document.getElementById('confirm-contact-email') || {value:''}).value.trim();
+    if (!newPhone && !newEmail) { statusEl.textContent = 'Please fill in at least one field.'; return; }
+
+    saveBtn.disabled    = true;
+    saveBtn.textContent = 'Saving…';
+    statusEl.textContent = '';
+
+    var tokenType  = dlPending ? 'dl'    : 'phone';
+    var authPhone  = pending   ? pending.phone  : '';
+    var authDob    = dlPending ? dlPending.dobHash : '';
+    var authToken  = dlPending ? dlPending.token  : (pending ? pending.token : '');
+    var authIdx    = dlPending ? dlPending.idx    : (pending ? pending.idx   : -1);
+
+    var body = 'action=mmm_update_guest_contact'
+      + '&event='      + encodeURIComponent(EVENT)
+      + '&idx='        + encodeURIComponent(authIdx)
+      + '&token='      + encodeURIComponent(authToken)
+      + '&token_type=' + encodeURIComponent(tokenType)
+      + '&phone='      + encodeURIComponent(authPhone)
+      + '&dob_hash='   + encodeURIComponent(authDob)
+      + '&new_phone='  + encodeURIComponent(newPhone)
+      + '&new_email='  + encodeURIComponent(newEmail);
+
+    fetch(AJAX, { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        saveBtn.disabled    = false;
+        saveBtn.textContent = 'Save';
+        if (res.success) {
+          document.getElementById('confirm-contact-missing').style.display = 'none';
+        } else {
+          statusEl.textContent = res.data || 'Error saving.';
+        }
+      })
+      .catch(function() {
+        saveBtn.disabled    = false;
+        saveBtn.textContent = 'Save';
+        statusEl.textContent = 'Connection error.';
+      });
+  });
 
   backdrop.addEventListener('click', closeConfirm);
   confirmNo.addEventListener('click', closeConfirm);
@@ -958,7 +1047,7 @@ if (HAS_GUESTS) {
         }
         var m = res.data[0];
         pending = { idx: m.idx, token: m.token, phone: m.full_phone };
-        openConfirm(m.name);
+        openConfirm(m.name, null, m.missing || []);
       })
       .catch(function () {
         searchBtn.disabled = !(digits.length === 7 || digits.length >= 10);
@@ -1058,7 +1147,7 @@ if (HAS_GUESTS) {
             ? 'Matched by DOB + Last Name \u2713'
             : 'Matched by name only \u2014 verify photo ID';
           dlPending = { idx: m.idx, token: m.token, dobHash: m.dob_hash || '' };
-          openConfirm(m.name, label);
+          openConfirm(m.name, label, m.missing || []);
         });
     }).catch(function() {
       showOverlay('err', '❌ Connection error.');
