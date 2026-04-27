@@ -7,7 +7,7 @@ function mmm_render_guest_list_page() {
     $selected    = isset( $_GET['event'] ) ? sanitize_title_with_dashes( $_GET['event'] ) : '';
 
     // Pagination / sort / search params (all server-side)
-    $per_page   = 100;
+    $per_page   = 250;
     $pg         = max( 1, (int) ( $_GET['pg']     ?? 1 ) );
     $sort_col   = in_array( $_GET['sort'] ?? '', [ 'first_name', 'last_name', 'status' ], true )
                     ? $_GET['sort'] : 'first_name';
