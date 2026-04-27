@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.5
+ * Version: 3.16.6
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.5');
+define('MMM_ECI_VERSION', '3.16.6');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -306,7 +306,15 @@ function mmm_normalize_phone( $phone ) {
 
 function mmm_get_phone_index( $slug ) {
     $cache_key = 'mmm_pi_' . $slug;
-    $index     = get_transient( $cache_key );
+    $index = get_transient( $cache_key );
+    if ( $index !== false ) {
+        // Rebuild if cached before has_email was added (backward compat)
+        $first_bucket = reset( $index );
+        $first_entry  = $first_bucket ? reset( $first_bucket ) : null;
+        if ( $first_entry && ! array_key_exists( 'has_email', $first_entry ) ) {
+            $index = false;
+        }
+    }
     if ( $index !== false ) {
         return $index;
     }
@@ -1086,6 +1094,9 @@ function mmm_ajax_edit_guest() {
     $g['qr_id']           = sanitize_text_field( $_POST['qr_id']           ?? $g['qr_id'] );
     $g['phone']           = sanitize_text_field( $_POST['phone']           ?? $g['phone'] );
     $g['email']           = sanitize_email(      $_POST['email']           ?? $g['email'] ?? '' );
+    if ( isset( $_POST['phone'] ) || isset( $_POST['email'] ) ) {
+        $g['contact_updated_at'] = date_i18n( 'g:ia, l, F j, Y' );
+    }
     $g['member_status']   = sanitize_text_field( $_POST['member_status']   ?? $g['member_status'] );
     $g['bargaining_unit'] = sanitize_text_field( $_POST['bargaining_unit'] ?? $g['bargaining_unit'] );
     unset( $g );
@@ -1266,6 +1277,7 @@ function mmm_ajax_update_guest_contact() {
 
     if ( $new_phone ) $guests[ $idx ]['phone'] = $new_phone;
     if ( $new_email ) $guests[ $idx ]['email'] = $new_email;
+    $guests[ $idx ]['contact_updated_at'] = date_i18n( 'g:ia, l, F j, Y' );
 
     if ( mmm_save_guests( $event_slug, $guests ) === false ) {
         wp_send_json_error( 'Could not save.' );

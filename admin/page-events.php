@@ -75,6 +75,7 @@ function mmm_render_event_list() {
 
             $meta     = mmm_load_meta( $slug );
             $checkins = mmm_load_checkins( $slug );
+            $guests   = mmm_load_guests( $slug );
             $csv_filename = sanitize_file_name( ( $meta['name'] ?? $slug ) . ' - ' . date( 'F-j-Y' ) . '.csv' );
 
             header( 'Content-Type: text/csv' );
@@ -86,9 +87,12 @@ function mmm_render_event_list() {
             fputcsv( $output, [
                 'First Name', 'Last Name', 'Bargaining Unit', 'Unit', 'Employer',
                 'Jurisdiction', 'Job Title', 'Baseyard', 'Island', 'Member Status',
-                'AFSCME ID', 'Phone', 'Check-In Method', 'Checked in Time',
+                'AFSCME ID', 'Phone', 'Email', 'Check-In Method', 'Checked in Time', 'Contact Updated',
             ] );
             foreach ( $checkins as $entry ) {
+                $g_idx            = $entry['guest_idx'] ?? null;
+                $guest            = ( $g_idx !== null && isset( $guests[ $g_idx ] ) ) ? $guests[ $g_idx ] : [];
+                $contact_updated  = $guest['contact_updated_at'] ?? '';
                 fputcsv( $output, array_map( 'mmm_csv_escape', [
                     $entry['first_name']      ?? '',
                     $entry['last_name']       ?? '',
@@ -102,8 +106,10 @@ function mmm_render_event_list() {
                     $entry['member_status']   ?? '',
                     $entry['afscme_id']       ?? '',
                     $entry['phone']           ?? '',
+                    $guest['email']           ?? '',
                     $entry['method']          ?? 'qr',
                     $entry['time']            ?? '',
+                    $contact_updated,
                 ] ) );
             }
             fclose( $output );
