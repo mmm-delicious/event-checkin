@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.8
+ * Version: 3.16.9
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.8');
+define('MMM_ECI_VERSION', '3.16.9');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -196,6 +196,17 @@ function mmm_validate_slug( $slug ) {
     return $slug !== '' && preg_match( '/^[a-z0-9_-]+$/', $slug );
 }
 
+function mmm_is_active_member( $member_status ) {
+    $ms = strtolower( trim( $member_status ) );
+    return $ms === 'active' || $ms === 'y';
+}
+
+function mmm_checkin_success_response( $name, $member_status ) {
+    if ( ! mmm_is_active_member( $member_status ) ) {
+        wp_send_json_success( [ 'message' => "✅ {$name} checked in — New Member, please see a staff member.", 'warning' => true ] );
+    }
+    wp_send_json_success( "✅ Welcome {$name}, you are now checked in." );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // QR CHECK-IN (WP user path — reads/writes checkins file only)
@@ -246,7 +257,7 @@ function mmm_handle_checkin() {
             $checkins[] = $new_entry;
             return $checkins;
         } );
-        wp_send_json_success( "✅ Welcome {$user->first_name}, you are now checked in." );
+        mmm_checkin_success_response( $user->first_name, $all_meta['member_status'][0] ?? '' );
     }
 
     // ── Path B: AFSCME card barcode → guest list lookup by qr_id ─────────────
@@ -292,7 +303,7 @@ function mmm_handle_checkin() {
         return $checkins;
     } );
 
-    wp_send_json_success( "✅ Welcome {$name}, you are now checked in." );
+    mmm_checkin_success_response( $name, $guest['member_status'] ?? '' );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -470,7 +481,7 @@ function mmm_checkin_by_phone() {
         return $checkins;
     } );
 
-    wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
+    mmm_checkin_success_response( $guest['first_name'], $guest['member_status'] ?? '' );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -738,7 +749,7 @@ function mmm_ajax_confirm_dl_checkin() {
         return $checkins;
     } );
 
-    wp_send_json_success( "✅ Welcome {$guest['first_name']}, you are now checked in." );
+    mmm_checkin_success_response( $guest['first_name'], $guest['member_status'] ?? '' );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
