@@ -247,6 +247,8 @@ function mmm_render_guest_list_page() {
                         <td><input type="text" id="edit-qr-id" style="width:100%;" /></td></tr>
                     <tr><td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Phone</td>
                         <td><input type="text" id="edit-phone" style="width:100%;" /></td></tr>
+                    <tr><td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Email</td>
+                        <td><input type="email" id="edit-email" style="width:100%;" /></td></tr>
                     <tr><td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Unit Name</td>
                         <td><input type="text" id="edit-bargaining-unit" style="width:100%;" /></td></tr>
                     <tr><td style="padding:6px 8px 6px 0; font-weight:600; white-space:nowrap;">Member Status</td>
@@ -516,6 +518,7 @@ function mmm_render_guest_list_page() {
                 document.getElementById('edit-last-name').value       = g.last_name       || '';
                 document.getElementById('edit-qr-id').value           = g.qr_id           || '';
                 document.getElementById('edit-phone').value           = g.phone           || '';
+                document.getElementById('edit-email').value           = g.email           || '';
                 document.getElementById('edit-bargaining-unit').value = g.bargaining_unit || '';
                 document.getElementById('edit-member-status').value   = g.member_status   || '';
                 document.getElementById('edit-checked-in').checked    = g.is_checked_in === '1';
@@ -538,6 +541,7 @@ function mmm_render_guest_list_page() {
             var ln  = document.getElementById('edit-last-name').value;
             var qr  = document.getElementById('edit-qr-id').value;
             var ph  = document.getElementById('edit-phone').value;
+            var em  = document.getElementById('edit-email').value;
             var bu  = document.getElementById('edit-bargaining-unit').value;
             var ms  = document.getElementById('edit-member-status').value;
             var isCI = document.getElementById('edit-checked-in').checked;
@@ -551,6 +555,7 @@ function mmm_render_guest_list_page() {
             fd.append('last_name',       ln);
             fd.append('qr_id',           qr);
             fd.append('phone',           ph);
+            fd.append('email',           em);
             fd.append('bargaining_unit', bu);
             fd.append('member_status',   ms);
             fd.append('is_checked_in',   isCI ? '1' : '0');
@@ -568,7 +573,7 @@ function mmm_render_guest_list_page() {
                             row.cells[1].textContent = qr;
                             row.cells[2].textContent = ph;
                             row.cells[4].textContent = ms;
-                            row.dataset.guest = JSON.stringify({ first_name: fn, last_name: ln, qr_id: qr, phone: ph, member_status: ms, bargaining_unit: bu, is_checked_in: isCI ? '1' : '0' });
+                            row.dataset.guest = JSON.stringify({ first_name: fn, last_name: ln, qr_id: qr, phone: ph, email: em, member_status: ms, bargaining_unit: bu, is_checked_in: isCI ? '1' : '0' });
 
                             if (isCI && !localState[editIdx]) {
                                 localState[editIdx] = 'manual';
