@@ -513,6 +513,7 @@ $site_icon   = get_site_icon_url(128);
 <div id="confirm-backdrop"></div>
 <div id="confirm-overlay">
   <h2>Confirm Check-In</h2>
+  <div id="confirm-new-member" style="display:none; margin:6px 0 10px; padding:8px 12px; background:#fff7ed; border-radius:8px; border:1px solid #fed7aa; font-size:0.85rem; font-weight:700; color:#92400e;">&#9888; New Member &mdash; needs enrollment, please see a staff member</div>
   <div id="confirm-name"></div>
   <div id="confirm-method"></div>
   <div id="confirm-contact-missing" style="display:none; margin:10px 0 14px; padding:10px 12px; background:#fff7ed; border-radius:10px; border:1px solid #fed7aa; text-align:left;">
@@ -938,11 +939,23 @@ if (HAS_GUESTS) {
   function closeConfirm() {
     backdrop.style.display  = 'none';
     confirmOv.style.display = 'none';
+    confirmOv.style.borderColor  = '#0073aa';
+    confirmNm.style.color        = '#0073aa';
+    confirmYes.style.background  = '#16a34a';
+    document.getElementById('confirm-new-member').style.display = 'none';
     pending   = null;
     dlPending = null;
   }
 
-  function openConfirm(name, label, missing) {
+  function openConfirm(name, label, missing, memberStatus) {
+    var ms = (memberStatus || '').toLowerCase().trim();
+    var isNewMember = ms !== 'active' && ms !== 'y';
+
+    document.getElementById('confirm-new-member').style.display = isNewMember ? 'block' : 'none';
+    confirmOv.style.borderColor = isNewMember ? '#d97706' : '#0073aa';
+    confirmNm.style.color       = isNewMember ? '#92400e' : '#0073aa';
+    confirmYes.style.background = isNewMember ? '#d97706' : '#16a34a';
+
     confirmNm.textContent    = name;
     confirmMthd.textContent  = label || '';
 
@@ -1047,7 +1060,7 @@ if (HAS_GUESTS) {
         }
         var m = res.data[0];
         pending = { idx: m.idx, token: m.token, phone: m.full_phone };
-        openConfirm(m.name, null, m.missing || []);
+        openConfirm(m.name, null, m.missing || [], m.member_status || '');
       })
       .catch(function () {
         searchBtn.disabled = !(digits.length === 7 || digits.length >= 10);
@@ -1147,7 +1160,7 @@ if (HAS_GUESTS) {
             ? 'Matched by DOB + Last Name \u2713'
             : 'Matched by name only \u2014 verify photo ID';
           dlPending = { idx: m.idx, token: m.token, dobHash: m.dob_hash || '' };
-          openConfirm(m.name, label, m.missing || []);
+          openConfirm(m.name, label, m.missing || [], m.member_status || '');
         });
     }).catch(function() {
       showOverlay('err', '❌ Connection error.');

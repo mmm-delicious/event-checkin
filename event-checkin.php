@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.9
+ * Version: 3.16.10
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.9');
+define('MMM_ECI_VERSION', '3.16.10');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -322,7 +322,7 @@ function mmm_get_phone_index( $slug ) {
         // Rebuild if cached before has_email was added (backward compat)
         $first_bucket = reset( $index );
         $first_entry  = $first_bucket ? reset( $first_bucket ) : null;
-        if ( $first_entry && ! array_key_exists( 'has_email', $first_entry ) ) {
+        if ( $first_entry && ( ! array_key_exists( 'has_email', $first_entry ) || ! array_key_exists( 'member_status', $first_entry ) ) ) {
             $index = false;
         }
     }
@@ -336,9 +336,10 @@ function mmm_get_phone_index( $slug ) {
         $phone = mmm_normalize_phone( $guest['phone'] ?? '' );
         if ( ! $phone ) continue;
         $index[ $phone ][] = [
-            'idx'       => $idx,
-            'name'      => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
-            'has_email' => ! empty( $guest['email'] ),
+            'idx'           => $idx,
+            'name'          => trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) ),
+            'has_email'     => ! empty( $guest['email'] ),
+            'member_status' => $guest['member_status'] ?? '',
         ];
     }
 
@@ -400,11 +401,12 @@ function mmm_search_by_phone() {
         $idx       = $entry['idx'];
         $token     = hash_hmac( 'sha256', $event_slug . '|' . $idx . '|' . $phone, AUTH_KEY );
         $matches[] = [
-            'idx'        => $idx,
-            'name'       => $entry['name'],
-            'token'      => $token,
-            'full_phone' => $phone,
-            'missing'    => ( $entry['has_email'] ?? true ) ? [] : [ 'email' ],
+            'idx'           => $idx,
+            'name'          => $entry['name'],
+            'token'         => $token,
+            'full_phone'    => $phone,
+            'missing'       => ( $entry['has_email'] ?? true ) ? [] : [ 'email' ],
+            'member_status' => $entry['member_status'] ?? '',
         ];
     }
 
@@ -638,15 +640,16 @@ function mmm_ajax_checkin_by_dl() {
                 $idx  = $entry['idx'];
                 $name = trim( ( $entry['guest']['first_name'] ?? '' ) . ' ' . ( $entry['guest']['last_name'] ?? '' ) );
                 $matches[] = [
-                    'idx'      => $idx,
-                    'name'     => $name,
-                    'tier'     => 1,
-                    'dob_hash' => $dob_hash,
-                    'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window, AUTH_KEY ),
-                    'missing'  => array_values( array_filter( [
+                    'idx'           => $idx,
+                    'name'          => $name,
+                    'tier'          => 1,
+                    'dob_hash'      => $dob_hash,
+                    'token'         => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . $dob_hash . '|' . $window, AUTH_KEY ),
+                    'missing'       => array_values( array_filter( [
                         empty( $entry['guest']['phone'] ) ? 'phone' : null,
                         empty( $entry['guest']['email'] ) ? 'email' : null,
                     ] ) ),
+                    'member_status' => $entry['guest']['member_status'] ?? '',
                 ];
             }
             wp_send_json_success( $matches );
@@ -671,15 +674,16 @@ function mmm_ajax_checkin_by_dl() {
         $idx  = $entry['idx'];
         $name = trim( ( $entry['guest']['first_name'] ?? '' ) . ' ' . ( $entry['guest']['last_name'] ?? '' ) );
         $matches[] = [
-            'idx'      => $idx,
-            'name'     => $name,
-            'tier'     => 2,
-            'dob_hash' => '',
-            'token'    => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . '' . '|' . $window, AUTH_KEY ),
-            'missing'  => array_values( array_filter( [
+            'idx'           => $idx,
+            'name'          => $name,
+            'tier'          => 2,
+            'dob_hash'      => '',
+            'token'         => hash_hmac( 'sha256', 'dl|' . $event_slug . '|' . $idx . '|' . '' . '|' . $window, AUTH_KEY ),
+            'missing'       => array_values( array_filter( [
                 empty( $entry['guest']['phone'] ) ? 'phone' : null,
                 empty( $entry['guest']['email'] ) ? 'email' : null,
             ] ) ),
+            'member_status' => $entry['guest']['member_status'] ?? '',
         ];
     }
     wp_send_json_success( $matches );

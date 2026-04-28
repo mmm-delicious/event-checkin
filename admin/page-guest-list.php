@@ -191,7 +191,16 @@ function mmm_render_guest_list_page() {
                     <td><?= esc_html( $guest['qr_id'] ?? '' ); ?></td>
                     <td><?= esc_html( $guest['phone'] ?? '' ); ?></td>
                     <td><?= esc_html( $guest['baseyard'] ?? '' ); ?></td>
-                    <td><?= esc_html( $guest['member_status'] ?? '' ); ?></td>
+                    <?php
+                    $ms_val    = $guest['member_status'] ?? '';
+                    $ms_active = in_array( strtolower( trim( $ms_val ) ), [ 'active', 'y' ], true );
+                    ?>
+                    <td><?php
+                        if ( $ms_val !== '' && ! $ms_active ) {
+                            echo '<span style="color:#b45309; margin-right:3px;">&#9888;</span>';
+                        }
+                        echo esc_html( $ms_val );
+                    ?></td>
                     <td id="guest-status-<?= $idx; ?>">
                         <?php if ( $is_checked ): ?>
                             <span style="color:#2e7d32; font-weight:600;">&#10003; <?= esc_html( $time_in ); ?></span>
