@@ -578,9 +578,16 @@ function queueCheckin(code) {
   updateQueueBadge();
 }
 
+function timedFetch(url, opts, ms) {
+  var ctrl = new AbortController();
+  var tid  = setTimeout(function() { ctrl.abort(); }, ms || 5000);
+  opts     = Object.assign({}, opts, { signal: ctrl.signal });
+  return fetch(url, opts).finally(function() { clearTimeout(tid); });
+}
+
 function submitCheckin(code) {
   var body = 'action=ur_checkin&data=' + encodeURIComponent(code) + '&event=' + encodeURIComponent(EVENT);
-  return fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+  return timedFetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
     .then(function (r) { return r.json(); });
 }
 
@@ -865,7 +872,10 @@ function handleScan(decoded) {
   }
   submitCheckin(decoded)
     .then(function (res) { handleResponse(res); })
-    .catch(function () { showOverlay('err', 'Connection error.'); });
+    .catch(function () {
+      queueCheckin(decoded);
+      showOverlay('ok', 'Queued — will sync when back online');
+    });
 }
 
 startBtn.addEventListener('click', function () {
@@ -1055,7 +1065,7 @@ if (HAS_GUESTS) {
     resultEl.textContent = '';
     searchBtn.disabled   = true;
     var body = 'action=ur_search_by_phone&phone=' + encodeURIComponent(fmt(digits)) + '&event=' + encodeURIComponent(EVENT);
-    fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    timedFetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         searchBtn.disabled = !(digits.length === 7 || digits.length >= 10);
@@ -1085,7 +1095,7 @@ if (HAS_GUESTS) {
         + '&idx='      + encodeURIComponent(p.idx)
         + '&dob_hash=' + encodeURIComponent(p.dobHash)
         + '&token='    + encodeURIComponent(p.token);
-      fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+      timedFetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
         .then(function (r) { return r.json(); })
         .then(function (res) {
           confirmYes.disabled = false;
@@ -1113,7 +1123,7 @@ if (HAS_GUESTS) {
       + '&idx='    + encodeURIComponent(pending.idx)
       + '&phone='  + encodeURIComponent(pending.phone)
       + '&token='  + encodeURIComponent(pending.token);
-    fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    timedFetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         confirmYes.disabled = false;
@@ -1152,7 +1162,7 @@ if (HAS_GUESTS) {
         + '&last_name='  + encodeURIComponent(lastName)
         + '&first_name=' + encodeURIComponent(firstName)
         + '&dob_hash='   + encodeURIComponent(dobHash);
-      return fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+      return timedFetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
         .then(function(r) { return r.json(); })
         .then(function(res) {
           if (!res.success) {
