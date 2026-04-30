@@ -949,6 +949,15 @@ if (HAS_GUESTS) {
 
   function openConfirm(name, label, missing, memberStatus) {
     var ms = (memberStatus || '').toLowerCase().trim();
+
+    if (ms === 'opt out') {
+      pending   = null;
+      dlPending = null;
+      qrLocked  = false;
+      showOverlay('err', '🚫 Please ask for assistance.');
+      return;
+    }
+
     var isNewMember = ms !== 'active' && ms !== 'y';
 
     document.getElementById('confirm-new-member').style.display = isNewMember ? 'block' : 'none';

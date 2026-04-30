@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Event Check-In
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.16.10
+ * Version: 3.16.11
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.16.10');
+define('MMM_ECI_VERSION', '3.16.11');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -201,6 +201,10 @@ function mmm_is_active_member( $member_status ) {
     return $ms === 'active' || $ms === 'y';
 }
 
+function mmm_is_opt_out( $member_status ) {
+    return strtolower( trim( $member_status ) ) === 'opt out';
+}
+
 function mmm_checkin_success_response( $name, $member_status ) {
     if ( ! mmm_is_active_member( $member_status ) ) {
         wp_send_json_success( [ 'message' => "✅ {$name} checked in — New Member, please see a staff member.", 'warning' => true ] );
@@ -248,6 +252,9 @@ function mmm_handle_checkin() {
             'ts'              => time(),
             'method'          => 'qr',
         ];
+        if ( mmm_is_opt_out( $all_meta['member_status'][0] ?? '' ) ) {
+            wp_send_json_error( '🚫 Please ask for assistance.' );
+        }
         mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $user, $new_entry ) {
             foreach ( $checkins as $entry ) {
                 if ( ! empty( $entry['email'] ) && $entry['email'] === $user->user_email ) {
@@ -275,6 +282,10 @@ function mmm_handle_checkin() {
     $guest_idx  = $entry_data['idx'];
     $guest      = $entry_data['guest'];
     $name       = trim( ( $guest['first_name'] ?? '' ) . ' ' . ( $guest['last_name'] ?? '' ) );
+
+    if ( mmm_is_opt_out( $guest['member_status'] ?? '' ) ) {
+        wp_send_json_error( '🚫 Please ask for assistance.' );
+    }
 
     mmm_locked_checkins_update( $slug, function ( $checkins ) use ( $guest, $guest_idx, $name ) {
         foreach ( $checkins as $ci ) {
@@ -451,6 +462,10 @@ function mmm_checkin_by_phone() {
     $guest  = $guests[ $idx ] ?? null;
     if ( ! $guest ) {
         wp_send_json_error( '❌ Guest record not found.' );
+    }
+
+    if ( mmm_is_opt_out( $guest['member_status'] ?? '' ) ) {
+        wp_send_json_error( '🚫 Please ask for assistance.' );
     }
 
     $new_entry = [
@@ -721,6 +736,10 @@ function mmm_ajax_confirm_dl_checkin() {
     $guest  = $guests[ $idx ] ?? null;
     if ( ! $guest ) {
         wp_send_json_error( '❌ Guest record not found.' );
+    }
+
+    if ( mmm_is_opt_out( $guest['member_status'] ?? '' ) ) {
+        wp_send_json_error( '🚫 Please ask for assistance.' );
     }
 
     $new_entry = [

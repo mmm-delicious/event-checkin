@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 3.16.10
+Stable tag: 3.16.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,9 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.16.11 =
+* Fix: Block check-in for members with "Opt Out" status across all entry methods (QR, barcode, phone, DL) — shows red "Please ask for assistance" overlay and prevents write to check-in file
 
 = 3.16.10 =
 * New: Confirm check-in overlay turns amber with "New Member — needs enrollment" banner for non-active members (phone and DL flows)
