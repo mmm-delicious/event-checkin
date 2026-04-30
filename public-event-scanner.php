@@ -374,9 +374,10 @@ $site_icon   = get_site_icon_url(128);
       max-width: 460px;
       line-height: 1.4;
     }
-    #overlay-message.ok   { border-color: #16a34a; color: #16a34a; }
-    #overlay-message.warn { border-color: #d97706; color: #92400e; background: #fffbeb; }
-    #overlay-message.err  { border-color: #dc2626; color: #dc2626; }
+    #overlay-message.ok     { border-color: #16a34a; color: #16a34a; }
+    #overlay-message.warn   { border-color: #d97706; color: #92400e; background: #fffbeb; }
+    #overlay-message.err    { border-color: #dc2626; color: #dc2626; }
+    #overlay-message.optout { border-color: #dc2626; color: #dc2626; background: #fef2f2; }
 
     /* ── Confirm overlay ─────────────────────────────────── */
     #confirm-backdrop {
@@ -514,6 +515,7 @@ $site_icon   = get_site_icon_url(128);
 <div id="confirm-overlay">
   <h2>Confirm Check-In</h2>
   <div id="confirm-new-member" style="display:none; margin:6px 0 10px; padding:8px 12px; background:#fff7ed; border-radius:8px; border:1px solid #fed7aa; font-size:0.85rem; font-weight:700; color:#92400e;">&#9888; New Member &mdash; needs enrollment, please see a staff member</div>
+  <div id="confirm-opt-out" style="display:none; margin:6px 0 10px; padding:12px 14px; background:#fef2f2; border-radius:8px; border:2px solid #dc2626; font-size:1rem; font-weight:800; color:#dc2626; line-height:1.4; text-align:center;">🚫 OPT OUT MEMBER<br><span style="font-size:0.8rem; font-weight:600; color:#991b1b;">Check-in recorded. Please speak with this member about rejoining the union.</span></div>
   <div id="confirm-name"></div>
   <div id="confirm-method"></div>
   <div id="confirm-contact-missing" style="display:none; margin:10px 0 14px; padding:10px 12px; background:#fff7ed; border-radius:10px; border:1px solid #fed7aa; text-align:left;">
@@ -626,12 +628,13 @@ function showOverlay(state, text) {
   }, state === 'warn' ? 8000 : 5000);
 }
 
-// Handles both legacy string responses and new {message, warning} objects
+// Handles both legacy string responses and new {message, warning, opt_out} objects
 function handleResponse(res, onDone) {
   if (!res.success) {
     showOverlay('err', res.data || '❌ Error.');
   } else if (res.data && typeof res.data === 'object') {
-    showOverlay(res.data.warning ? 'warn' : 'ok', res.data.message);
+    var state = res.data.opt_out ? 'optout' : (res.data.warning ? 'warn' : 'ok');
+    showOverlay(state, res.data.message);
   } else {
     showOverlay('ok', res.data);
   }
@@ -943,27 +946,21 @@ if (HAS_GUESTS) {
     confirmNm.style.color        = '#0073aa';
     confirmYes.style.background  = '#16a34a';
     document.getElementById('confirm-new-member').style.display = 'none';
+    document.getElementById('confirm-opt-out').style.display    = 'none';
     pending   = null;
     dlPending = null;
   }
 
   function openConfirm(name, label, missing, memberStatus) {
-    var ms = (memberStatus || '').toLowerCase().trim();
+    var ms        = (memberStatus || '').toLowerCase().trim();
+    var isOptOut  = ms === 'opt out';
+    var isNewMember = !isOptOut && ms !== 'active' && ms !== 'y';
 
-    if (ms === 'opt out') {
-      pending   = null;
-      dlPending = null;
-      qrLocked  = false;
-      showOverlay('err', '🚫 Please ask for assistance.');
-      return;
-    }
-
-    var isNewMember = ms !== 'active' && ms !== 'y';
-
+    document.getElementById('confirm-opt-out').style.display    = isOptOut   ? 'block' : 'none';
     document.getElementById('confirm-new-member').style.display = isNewMember ? 'block' : 'none';
-    confirmOv.style.borderColor = isNewMember ? '#d97706' : '#0073aa';
-    confirmNm.style.color       = isNewMember ? '#92400e' : '#0073aa';
-    confirmYes.style.background = isNewMember ? '#d97706' : '#16a34a';
+    confirmOv.style.borderColor = isOptOut ? '#dc2626' : (isNewMember ? '#d97706' : '#0073aa');
+    confirmNm.style.color       = isOptOut ? '#dc2626' : (isNewMember ? '#92400e' : '#0073aa');
+    confirmYes.style.background = isOptOut ? '#dc2626' : (isNewMember ? '#d97706' : '#16a34a');
 
     confirmNm.textContent    = name;
     confirmMthd.textContent  = label || '';
