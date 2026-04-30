@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name: Event Check-In
+ * Plugin Name: UnionRoll
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.17.0
+ * Version: 3.18.0
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Tested up to: 6.9
- * Text Domain: event-checkin
+ * Text Domain: union-roll
  */
 
 defined('ABSPATH') || exit;
@@ -16,15 +16,15 @@ defined('ABSPATH') || exit;
 // Auto-updates via GitHub (checks every 48h to minimise plugins-page latency)
 require_once plugin_dir_path(__FILE__) . 'lib/plugin-update-checker/plugin-update-checker.php';
 $mmm_eci_updater = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-    'https://github.com/mmm-delicious/event-checkin/',
+    'https://github.com/mmm-delicious/union-roll/',
     __FILE__,
-    'event-checkin'
+    'union-roll'
 );
 $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.17.0');
+define('MMM_ECI_VERSION', '3.18.0');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -219,8 +219,8 @@ function mmm_checkin_success_response( $name, $member_status ) {
 // QR CHECK-IN (WP user path — reads/writes checkins file only)
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_checkin', 'mmm_handle_checkin' );
-add_action( 'wp_ajax_nopriv_mmm_checkin', 'mmm_handle_checkin' );
+add_action( 'wp_ajax_ur_checkin', 'mmm_handle_checkin' );
+add_action( 'wp_ajax_nopriv_ur_checkin', 'mmm_handle_checkin' );
 
 function mmm_handle_checkin() {
     if ( empty( $_POST['data'] ) ) {
@@ -372,8 +372,8 @@ function mmm_get_qr_index( $slug ) {
     return $index;
 }
 
-add_action( 'wp_ajax_mmm_search_by_phone', 'mmm_search_by_phone' );
-add_action( 'wp_ajax_nopriv_mmm_search_by_phone', 'mmm_search_by_phone' );
+add_action( 'wp_ajax_ur_search_by_phone', 'ur_search_by_phone' );
+add_action( 'wp_ajax_nopriv_ur_search_by_phone', 'ur_search_by_phone' );
 
 function mmm_search_by_phone() {
     $raw_digits = preg_replace( '/\D/', '', $_POST['phone'] ?? '' );
@@ -432,8 +432,8 @@ function mmm_search_by_phone() {
 // PHONE CONFIRM CHECK-IN — reads guest from guests file, writes checkins only
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_checkin_by_phone', 'mmm_checkin_by_phone' );
-add_action( 'wp_ajax_nopriv_mmm_checkin_by_phone', 'mmm_checkin_by_phone' );
+add_action( 'wp_ajax_ur_checkin_by_phone', 'ur_checkin_by_phone' );
+add_action( 'wp_ajax_nopriv_ur_checkin_by_phone', 'ur_checkin_by_phone' );
 
 function mmm_checkin_by_phone() {
     $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
@@ -604,8 +604,8 @@ function mmm_dl_check_rate_limit() {
 
 // ── Step 1: Search by DL data — returns candidate + HMAC token ───────────────
 
-add_action( 'wp_ajax_mmm_checkin_by_dl',        'mmm_ajax_checkin_by_dl' );
-add_action( 'wp_ajax_nopriv_mmm_checkin_by_dl', 'mmm_ajax_checkin_by_dl' );
+add_action( 'wp_ajax_ur_checkin_by_dl',        'mmm_ajax_checkin_by_dl' );
+add_action( 'wp_ajax_nopriv_ur_checkin_by_dl', 'mmm_ajax_checkin_by_dl' );
 
 function mmm_ajax_checkin_by_dl() {
     if ( ! mmm_dl_check_rate_limit() ) {
@@ -698,8 +698,8 @@ function mmm_ajax_checkin_by_dl() {
 
 // ── Step 2: Confirm DL check-in — verifies HMAC + writes checkins file ───────
 
-add_action( 'wp_ajax_mmm_confirm_dl_checkin',        'mmm_ajax_confirm_dl_checkin' );
-add_action( 'wp_ajax_nopriv_mmm_confirm_dl_checkin', 'mmm_ajax_confirm_dl_checkin' );
+add_action( 'wp_ajax_ur_confirm_dl_checkin',        'mmm_ajax_confirm_dl_checkin' );
+add_action( 'wp_ajax_nopriv_ur_confirm_dl_checkin', 'mmm_ajax_confirm_dl_checkin' );
 
 function mmm_ajax_confirm_dl_checkin() {
     $event_slug = sanitize_title_with_dashes( $_POST['event']    ?? '' );
@@ -767,10 +767,10 @@ function mmm_ajax_confirm_dl_checkin() {
 // CSV UPLOAD — Step 1: save temp file, return headers + guesses
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_preview_guest_csv', 'mmm_ajax_preview_guest_csv' );
+add_action( 'wp_ajax_ur_preview_guest_csv', 'mmm_ajax_preview_guest_csv' );
 
 function mmm_ajax_preview_guest_csv() {
-    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+    check_ajax_referer( 'ur_upload_guests', 'ur_guests_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( 'Unauthorized.' );
     }
@@ -884,10 +884,10 @@ function mmm_ajax_preview_guest_csv() {
 // CSV UPLOAD — Step 2: stream-process rows, write guests file, update meta
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_import_guest_csv', 'mmm_ajax_import_guest_csv' );
+add_action( 'wp_ajax_ur_import_guest_csv', 'mmm_ajax_import_guest_csv' );
 
 function mmm_ajax_import_guest_csv() {
-    check_ajax_referer( 'mmm_upload_guests', 'mmm_guests_nonce' );
+    check_ajax_referer( 'ur_upload_guests', 'ur_guests_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( 'Unauthorized.' );
     }
@@ -1023,10 +1023,10 @@ function mmm_ajax_import_guest_csv() {
 // guest_idx stored in each checkin entry enables O(1) idx lookup
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_poll_checkins', 'mmm_ajax_poll_checkins' );
+add_action( 'wp_ajax_ur_poll_checkins', 'mmm_ajax_poll_checkins' );
 
 function mmm_ajax_poll_checkins() {
-    check_ajax_referer( 'mmm_poll_checkins', 'mmm_poll_nonce' );
+    check_ajax_referer( 'ur_poll_checkins', 'ur_poll_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( 'Unauthorized.' );
     }
@@ -1079,10 +1079,10 @@ function mmm_ajax_poll_checkins() {
 // EDIT GUEST — reads/writes guests and checkins files separately
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_edit_guest', 'mmm_ajax_edit_guest' );
+add_action( 'wp_ajax_ur_edit_guest', 'mmm_ajax_edit_guest' );
 
 function mmm_ajax_edit_guest() {
-    check_ajax_referer( 'mmm_edit_guest', 'mmm_edit_nonce' );
+    check_ajax_referer( 'ur_edit_guest', 'ur_edit_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( 'Unauthorized.' );
     }
@@ -1172,10 +1172,10 @@ function mmm_ajax_edit_guest() {
 // ADD GUEST — appends to guests file; optionally appends to checkins file
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_add_guest', 'mmm_ajax_add_guest' );
+add_action( 'wp_ajax_ur_add_guest', 'mmm_ajax_add_guest' );
 
 function mmm_ajax_add_guest() {
-    check_ajax_referer( 'mmm_add_guest', 'mmm_add_nonce' );
+    check_ajax_referer( 'ur_add_guest', 'ur_add_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( 'Unauthorized.' );
     }
@@ -1252,8 +1252,8 @@ function mmm_ajax_add_guest() {
 // Only allows writing phone + email; no other fields.
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_mmm_update_guest_contact',        'mmm_ajax_update_guest_contact' );
-add_action( 'wp_ajax_nopriv_mmm_update_guest_contact', 'mmm_ajax_update_guest_contact' );
+add_action( 'wp_ajax_ur_update_guest_contact',        'mmm_ajax_update_guest_contact' );
+add_action( 'wp_ajax_nopriv_ur_update_guest_contact', 'mmm_ajax_update_guest_contact' );
 
 function mmm_ajax_update_guest_contact() {
     $event_slug = sanitize_title_with_dashes( $_POST['event']      ?? '' );
@@ -1316,7 +1316,7 @@ function mmm_ajax_update_guest_contact() {
 // ────────────────────────────────────────────────────────────────────────────
 
 add_action( 'admin_enqueue_scripts', function ( $hook ) {
-    if ( $hook !== 'toplevel_page_mmm_checkin' ) return;
+    if ( $hook !== 'toplevel_page_union_roll' ) return;
     wp_enqueue_script( 'html5-qrcode', MMM_ECI_URL . 'assets/js/html5-qrcode.min.js', [], MMM_ECI_VERSION, true );
     wp_enqueue_script( 'mmm-qr-js', MMM_ECI_URL . 'assets/js/qr-scanner.js', [ 'jquery' ], MMM_ECI_VERSION, true );
     wp_localize_script( 'mmm-qr-js', 'mmm_qr_ajax', [
@@ -1328,7 +1328,7 @@ add_action( 'admin_enqueue_scripts', function ( $hook ) {
 } );
 
 add_action( 'admin_enqueue_scripts', function ( $hook ) {
-    if ( strpos( $hook, 'mmm_view_checkins' ) === false ) return;
+    if ( strpos( $hook, 'union_roll_monitor' ) === false ) return;
     wp_enqueue_script( 'chartjs', MMM_ECI_URL . 'assets/js/chart.min.js', [], '4.4.4', true );
 } );
 

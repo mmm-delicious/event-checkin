@@ -18,7 +18,7 @@ document.addEventListener("DOMContentLoaded", function () {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: new URLSearchParams({
-          action: 'mmm_checkin',
+          action: 'union_roll',
           data: btoa(decodedText),
         }),
       })

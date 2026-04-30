@@ -1,4 +1,4 @@
-# MMM Event Check-In
+# UnionRoll
 
 A WordPress plugin for managing events, generating user QR codes, and checking attendees in via QR scan or phone number search.
 
@@ -22,17 +22,17 @@ A WordPress plugin for managing events, generating user QR codes, and checking a
 
 ## Installation
 
-1. Upload the `mmm-event-checkin` folder to `/wp-content/plugins/`
+1. Upload the `union-roll` folder to `/wp-content/plugins/`
 2. Activate the plugin through the Plugins menu in WordPress
-3. Go to **Event Check-In** in the admin menu to create your first event
+3. Go to **UnionRoll** in the admin menu to create your first event
 
 ## Usage
 
 ### Creating an Event
-Go to **Event Check-In** in the admin sidebar and enter an event name. This creates a JSON file in `wp-content/uploads/mmm-event-checkin/events/`.
+Go to **UnionRoll** in the admin sidebar and enter an event name. This creates a JSON file in `wp-content/uploads/union-roll/events/`.
 
 ### Scanning Check-Ins (Admin)
-The top-level **Event Check-In** menu page includes a live QR scanner. Select the active event, point the camera at a member's QR code, and check-ins are recorded instantly with audio confirmation.
+The top-level **UnionRoll** menu page includes a live QR scanner. Select the active event, point the camera at a member's QR code, and check-ins are recorded instantly with audio confirmation.
 
 ### Public Scanner Page
 Create a WordPress page and assign the **Public Event Scanner** template. Append `?event=your-event-slug` to the URL to load the correct event. Share this URL with volunteers who don't have admin access.
@@ -72,8 +72,8 @@ From the Event List, click **Export Check-ins** next to any event to download a 
 ## File Structure
 
 ```
-mmm-event-checkin/
-├── mmm-event-checkin.php       # Main plugin file, AJAX handlers, template routing
+union-roll/
+├── union-roll.php       # Main plugin file, AJAX handlers, template routing
 ├── public-event-scanner.php    # Public-facing scanner page template (QR + phone dialpad)
 ├── admin/
 │   ├── class-admin-menu.php    # Registers admin menu pages

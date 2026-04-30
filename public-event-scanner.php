@@ -545,7 +545,7 @@ const EVENT      = <?php echo json_encode($event_slug); ?>;
 const DEF_AREA   = <?php echo json_encode($default_area); ?>;
 const HAS_GUESTS = <?php echo $has_guests ? 'true' : 'false'; ?>;
 const PLUGIN_URL = <?php echo json_encode($plugin_url); ?>;
-const QUEUE_KEY  = 'mmm_checkin_queue_' + EVENT;
+const QUEUE_KEY  = 'ur_checkin_queue_' + EVENT;
 
 const sndOk  = document.getElementById('snd-ok');
 const sndErr = document.getElementById('snd-err');
@@ -579,7 +579,7 @@ function queueCheckin(code) {
 }
 
 function submitCheckin(code) {
-  var body = 'action=mmm_checkin&data=' + encodeURIComponent(code) + '&event=' + encodeURIComponent(EVENT);
+  var body = 'action=ur_checkin&data=' + encodeURIComponent(code) + '&event=' + encodeURIComponent(EVENT);
   return fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
     .then(function (r) { return r.json(); });
 }
@@ -1020,7 +1020,7 @@ if (HAS_GUESTS) {
     var authToken  = dlPending ? dlPending.token  : (pending ? pending.token : '');
     var authIdx    = dlPending ? dlPending.idx    : (pending ? pending.idx   : -1);
 
-    var body = 'action=mmm_update_guest_contact'
+    var body = 'action=ur_update_guest_contact'
       + '&event='      + encodeURIComponent(EVENT)
       + '&idx='        + encodeURIComponent(authIdx)
       + '&token='      + encodeURIComponent(authToken)
@@ -1054,7 +1054,7 @@ if (HAS_GUESTS) {
   searchBtn.addEventListener('click', function () {
     resultEl.textContent = '';
     searchBtn.disabled   = true;
-    var body = 'action=mmm_search_by_phone&phone=' + encodeURIComponent(fmt(digits)) + '&event=' + encodeURIComponent(EVENT);
+    var body = 'action=ur_search_by_phone&phone=' + encodeURIComponent(fmt(digits)) + '&event=' + encodeURIComponent(EVENT);
     fetch(AJAX, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
       .then(function (r) { return r.json(); })
       .then(function (res) {
@@ -1080,7 +1080,7 @@ if (HAS_GUESTS) {
       var p = dlPending;
       confirmYes.disabled = true;
       confirmNo.disabled  = true;
-      var body = 'action=mmm_confirm_dl_checkin'
+      var body = 'action=ur_confirm_dl_checkin'
         + '&event='    + encodeURIComponent(EVENT)
         + '&idx='      + encodeURIComponent(p.idx)
         + '&dob_hash=' + encodeURIComponent(p.dobHash)
@@ -1108,7 +1108,7 @@ if (HAS_GUESTS) {
     if (!pending) return;
     confirmYes.disabled = true;
     confirmNo.disabled  = true;
-    var body = 'action=mmm_checkin_by_phone'
+    var body = 'action=ur_checkin_by_phone'
       + '&event='  + encodeURIComponent(EVENT)
       + '&idx='    + encodeURIComponent(pending.idx)
       + '&phone='  + encodeURIComponent(pending.phone)
@@ -1147,7 +1147,7 @@ if (HAS_GUESTS) {
     var hashPromise = dobIso ? sha256hex(dobIso) : Promise.resolve('');
 
     hashPromise.then(function(dobHash) {
-      var body = 'action=mmm_checkin_by_dl'
+      var body = 'action=ur_checkin_by_dl'
         + '&event='      + encodeURIComponent(EVENT)
         + '&last_name='  + encodeURIComponent(lastName)
         + '&first_name=' + encodeURIComponent(firstName)

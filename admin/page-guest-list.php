@@ -17,9 +17,9 @@ function mmm_render_guest_list_page() {
     // Nonces generated ONCE — not per row
     $checkin_nonce = wp_create_nonce( 'mmm_manual_checkin' );
     $undo_nonce    = wp_create_nonce( 'mmm_undo_checkin' );
-    $poll_nonce    = wp_create_nonce( 'mmm_poll_checkins' );
-    $edit_nonce    = wp_create_nonce( 'mmm_edit_guest' );
-    $add_nonce     = wp_create_nonce( 'mmm_add_guest' );
+    $poll_nonce    = wp_create_nonce( 'ur_poll_checkins' );
+    $edit_nonce    = wp_create_nonce( 'ur_edit_guest' );
+    $add_nonce     = wp_create_nonce( 'ur_add_guest' );
 
     $event_meta   = null;
     $guests_page  = [];
@@ -88,7 +88,7 @@ function mmm_render_guest_list_page() {
 
     // Build base URL for pagination/sort links
     $base_url = add_query_arg( array_filter( [
-        'page'   => 'mmm_guest_list',
+        'page'   => 'union_roll_guests',
         'event'  => $selected,
         'sort'   => $sort_col,
         'dir'    => $sort_dir,
@@ -109,7 +109,7 @@ function mmm_render_guest_list_page() {
         <h1>Guest List</h1>
 
         <form method="get" style="margin-bottom:20px;">
-            <input type="hidden" name="page" value="mmm_guest_list">
+            <input type="hidden" name="page" value="union_roll_guests">
             <label for="mmm-event-select">Select Event:</label>
             <select name="event" id="mmm-event-select">
                 <option value="">-- Select an Event --</option>
@@ -129,7 +129,7 @@ function mmm_render_guest_list_page() {
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
             <button id="mmm-add-guest-btn" class="button button-primary">+ Add Guest</button>
             <form method="get" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                <input type="hidden" name="page"  value="mmm_guest_list">
+                <input type="hidden" name="page"  value="union_roll_guests">
                 <input type="hidden" name="event" value="<?= esc_attr( $selected ); ?>">
                 <input type="hidden" name="sort"  value="<?= esc_attr( $sort_col ); ?>">
                 <input type="hidden" name="dir"   value="<?= esc_attr( $sort_dir ); ?>">
@@ -441,9 +441,9 @@ function mmm_render_guest_list_page() {
         function pollCheckins() {
             if (document.querySelector('.mmm-manual-checkin[disabled], .mmm-undo-checkin[disabled]')) return;
             var fd = new FormData();
-            fd.append('action',         'mmm_poll_checkins');
+            fd.append('action',         'ur_poll_checkins');
             fd.append('event',          MMM_EVENT_SLUG);
-            fd.append('mmm_poll_nonce', MMM_POLL_NONCE);
+            fd.append('ur_poll_nonce', MMM_POLL_NONCE);
             fetch(ajaxurl, { method: 'POST', body: fd })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
@@ -556,8 +556,8 @@ function mmm_render_guest_list_page() {
             var isCI = document.getElementById('edit-checked-in').checked;
 
             var fd = new FormData();
-            fd.append('action',          'mmm_edit_guest');
-            fd.append('mmm_edit_nonce',  MMM_EDIT_NONCE);
+            fd.append('action',          'ur_edit_guest');
+            fd.append('ur_edit_nonce',  MMM_EDIT_NONCE);
             fd.append('event',           MMM_EVENT_SLUG);
             fd.append('guest_idx',       editIdx);
             fd.append('first_name',      fn);
@@ -637,8 +637,8 @@ function mmm_render_guest_list_page() {
             var isCI = document.getElementById('add-checked-in').checked;
 
             var fd = new FormData();
-            fd.append('action',          'mmm_add_guest');
-            fd.append('mmm_add_nonce',   MMM_ADD_NONCE);
+            fd.append('action',          'ur_add_guest');
+            fd.append('ur_add_nonce',   MMM_ADD_NONCE);
             fd.append('event',           MMM_EVENT_SLUG);
             fd.append('first_name',      fn);
             fd.append('last_name',       ln);
@@ -746,8 +746,8 @@ function mmm_render_guest_list_page() {
             var newEmail = document.getElementById('contact-email').value.trim() || g.email;
 
             var fd = new FormData();
-            fd.append('action',          'mmm_edit_guest');
-            fd.append('mmm_edit_nonce',  MMM_EDIT_NONCE);
+            fd.append('action',          'ur_edit_guest');
+            fd.append('ur_edit_nonce',  MMM_EDIT_NONCE);
             fd.append('event',           MMM_EVENT_SLUG);
             fd.append('guest_idx',       contactIdx);
             fd.append('first_name',      g.first_name);

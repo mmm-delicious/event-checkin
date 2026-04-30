@@ -1,4 +1,4 @@
-=== Event Check-In ===
+=== UnionRoll ===
 Contributors: mmmdelicious
 Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
@@ -12,7 +12,7 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 
 == Description ==
 
-Event Check-In lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
+UnionRoll lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
 

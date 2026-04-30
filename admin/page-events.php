@@ -201,7 +201,7 @@ function mmm_render_event_list() {
                             <small style="color:#666;">Replace list:</small><br>
                         <?php endif; ?>
                         <form method="POST" enctype="multipart/form-data" class="mmm-guest-upload-form" style="margin-top:4px;">
-                            <?php wp_nonce_field( 'mmm_upload_guests', 'mmm_guests_nonce' ); ?>
+                            <?php wp_nonce_field( 'ur_upload_guests', 'ur_guests_nonce' ); ?>
                             <input type="hidden" name="guest_event_name" value="<?= esc_attr( $meta['name'] ); ?>">
                             <input type="file" name="guest_csv" accept=".csv" required style="font-size:0.8rem; max-width:140px;">
                             <button type="submit" class="button" style="margin-top:4px;"><?= $guest_count > 0 ? 'Replace List' : 'Upload Guests'; ?></button>
@@ -318,8 +318,8 @@ function mmm_render_event_list() {
           importBtn.textContent = 'Importing\u2026';
 
           var fd = new FormData();
-          fd.append('action',           'mmm_import_guest_csv');
-          fd.append('mmm_guests_nonce', nonce);
+          fd.append('action',           'ur_import_guest_csv');
+          fd.append('ur_guests_nonce', nonce);
           fd.append('guest_event_name', eventName);
           fd.append('temp_key',         data.temp_key);
           fd.append('qr_col',           form.querySelector('#mmm-qr-col').value);
@@ -355,7 +355,7 @@ function mmm_render_event_list() {
           e.preventDefault();
           var btn       = form.querySelector('button[type="submit"]');
           var eventName = form.querySelector('[name="guest_event_name"]').value;
-          var nonce     = form.querySelector('[name="mmm_guests_nonce"]').value;
+          var nonce     = form.querySelector('[name="ur_guests_nonce"]').value;
           var statusEl  = form.querySelector('.upload-status');
           if (!statusEl) {
             statusEl = document.createElement('p');
@@ -367,7 +367,7 @@ function mmm_render_event_list() {
           statusEl.textContent = '';
 
           var fd = new FormData(form);
-          fd.append('action', 'mmm_preview_guest_csv');
+          fd.append('action', 'ur_preview_guest_csv');
           fetch(ajaxurl, { method: 'POST', body: fd })
             .then(function (r) { return r.json(); })
             .then(function (res) {

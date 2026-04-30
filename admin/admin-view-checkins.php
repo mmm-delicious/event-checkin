@@ -11,7 +11,7 @@ function mmm_render_checkin_view_page() {
         <h1>Check-In Monitor</h1>
 
         <form method="get" style="margin-bottom:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <input type="hidden" name="page" value="mmm_view_checkins" />
+            <input type="hidden" name="page" value="union_roll_monitor" />
             <label for="mmm-event-select"><strong>Select Event:</strong></label>
             <select name="event" id="mmm-event-select" style="padding:4px 8px;">
                 <option value="">-- Select an Event --</option>
@@ -182,7 +182,7 @@ function mmm_render_checkin_view_page() {
 
         // Stats + chart poll — tiny payload (~5 KB), runs every 10 s
         function fetchDashboard() {
-            var url = AJAX_URL + '?action=mmm_get_dashboard_data&event=' +
+            var url = AJAX_URL + '?action=ur_get_dashboard_data&event=' +
                       encodeURIComponent(EVENT_SLUG) + '&_wpnonce=' + encodeURIComponent(DASHBOARD_NONCE);
             fetch(url)
                 .then(function (r) { return r.json(); })
@@ -203,7 +203,7 @@ function mmm_render_checkin_view_page() {
 
         // Table data — separate poll every 30 s, not tied to chart refresh
         function fetchTable() {
-            var url = AJAX_URL + '?action=mmm_get_checkin_table&event=' +
+            var url = AJAX_URL + '?action=ur_get_checkin_table&event=' +
                       encodeURIComponent(EVENT_SLUG) + '&_wpnonce=' + encodeURIComponent(DASHBOARD_NONCE);
             fetch(url)
                 .then(function (r) { return r.json(); })
@@ -276,7 +276,7 @@ function mmm_render_checkin_view_page() {
 }
 
 // ── Dashboard data endpoint — returns stats + checkins only (no guests array) ──
-add_action( 'wp_ajax_mmm_get_dashboard_data', 'mmm_ajax_get_dashboard_data' );
+add_action( 'wp_ajax_ur_get_dashboard_data', 'mmm_ajax_get_dashboard_data' );
 
 function mmm_ajax_get_dashboard_data() {
     check_ajax_referer( 'mmm_dashboard_nonce' );
@@ -325,7 +325,7 @@ function mmm_ajax_get_dashboard_data() {
 }
 
 // ── Checkin table data — separate endpoint, loaded on init and every 30 s ───
-add_action( 'wp_ajax_mmm_get_checkin_table', 'mmm_ajax_get_checkin_table' );
+add_action( 'wp_ajax_ur_get_checkin_table', 'mmm_ajax_get_checkin_table' );
 
 function mmm_ajax_get_checkin_table() {
     check_ajax_referer( 'mmm_dashboard_nonce' );
