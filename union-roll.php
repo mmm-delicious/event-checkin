@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UnionRoll
  * Description: Generate QR codes for user check-in and manage events.
- * Version: 3.19.0
+ * Version: 3.19.1
  * Author: MMM Delicious
  * Developer: Mark McDonnell
  * Requires at least: 5.0
@@ -24,7 +24,7 @@ $mmm_eci_updater->setBranch('main');
 $mmm_eci_updater->scheduler->checkPeriod = 48; // setCheckPeriod() not available in bundled PUC v5p6
 
 // Constants
-define('MMM_ECI_VERSION', '3.19.0');
+define('MMM_ECI_VERSION', '3.19.1');
 define('MMM_ECI_PATH', plugin_dir_path(__FILE__));
 define('MMM_ECI_URL', plugin_dir_url(__FILE__));
 
@@ -372,8 +372,8 @@ function mmm_get_qr_index( $slug ) {
     return $index;
 }
 
-add_action( 'wp_ajax_ur_search_by_phone', 'ur_search_by_phone' );
-add_action( 'wp_ajax_nopriv_ur_search_by_phone', 'ur_search_by_phone' );
+add_action( 'wp_ajax_ur_search_by_phone', 'mmm_search_by_phone' );
+add_action( 'wp_ajax_nopriv_ur_search_by_phone', 'mmm_search_by_phone' );
 
 function mmm_search_by_phone() {
     $raw_digits = preg_replace( '/\D/', '', $_POST['phone'] ?? '' );
@@ -432,8 +432,8 @@ function mmm_search_by_phone() {
 // PHONE CONFIRM CHECK-IN — reads guest from guests file, writes checkins only
 // ────────────────────────────────────────────────────────────────────────────
 
-add_action( 'wp_ajax_ur_checkin_by_phone', 'ur_checkin_by_phone' );
-add_action( 'wp_ajax_nopriv_ur_checkin_by_phone', 'ur_checkin_by_phone' );
+add_action( 'wp_ajax_ur_checkin_by_phone', 'mmm_checkin_by_phone' );
+add_action( 'wp_ajax_nopriv_ur_checkin_by_phone', 'mmm_checkin_by_phone' );
 
 function mmm_checkin_by_phone() {
     $event_slug = sanitize_title_with_dashes( $_POST['event'] ?? '' );
