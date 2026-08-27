@@ -1070,8 +1070,7 @@ if (HAS_GUESTS) {
       .then(function (res) {
         searchBtn.disabled = !(digits.length === 7 || digits.length >= 10);
         if (!res.success) {
-          resultEl.textContent = res.data || 'No match found.';
-          try { sndErr.play(); } catch(e) {}
+          showOverlay('err', res.data || 'No match found.');
           return;
         }
         var m = res.data[0];
@@ -1080,7 +1079,7 @@ if (HAS_GUESTS) {
       })
       .catch(function () {
         searchBtn.disabled = !(digits.length === 7 || digits.length >= 10);
-        resultEl.textContent = 'Connection error.';
+        showOverlay('err', 'Connection error.');
       });
   });
 
