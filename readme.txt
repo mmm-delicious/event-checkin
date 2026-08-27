@@ -4,7 +4,7 @@ Tags: event, check-in, qr code, barcode, guest list
 Requires at least: 5.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 3.16.11
+Stable tag: 3.20.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,22 @@ Generate QR codes for event check-in and manage events with a live dashboard, gu
 UnionRoll lets you create events, import guest lists from CSV, and check guests in via QR code, barcode, or phone number lookup. Includes a live admin dashboard with charts and sortable tables.
 
 == Changelog ==
+
+= 3.20.0 =
+* Fix: Phone check-in "not found" now shows a full-size popover instead of tiny inline text
+
+= 3.19.1 =
+* Fix: Phone search and phone check-in AJAX handlers were registered to the wrong function names, causing "connection error" on both actions
+
+= 3.19.0 =
+* New: All fetch calls now use a 5s timeout — QR/barcode scans queue locally on timeout or dropped connection instead of freezing the scanner ("Queued — will sync when back online"), fixing iPad freezes when internet drops mid-meeting
+* New: Phone and DL check-in paths fail fast with a clear error instead of hanging indefinitely
+
+= 3.18.0 =
+* Rebrand: Plugin renamed from "Event Check-In" to "UnionRoll" — plugin header, admin menus, page slugs, AJAX actions, nonce keys, and localStorage keys all updated; main file renamed event-checkin.php → union-roll.php
+
+= 3.17.0 =
+* Change: Opt-out members are now checked in and recorded (rather than blocked), with a prominent red staff alert on both the QR and phone/DL check-in overlays prompting a conversation about rejoining
 
 = 3.16.11 =
 * Fix: Block check-in for members with "Opt Out" status across all entry methods (QR, barcode, phone, DL) — shows red "Please ask for assistance" overlay and prevents write to check-in file
